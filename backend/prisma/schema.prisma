@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  status    String   @default("pending")
+  truncated Boolean  @default(false)
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sentences   Sentence[]
+  userStories UserStory[]
+
+  @@index([createdAt])
+}
+
+model Sentence {
+  id         String @id @default(cuid())
+  documentId String
+  index      Int
+  text       String
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  links    StorySentence[]
+
+  @@unique([documentId, index])
+  @@index([documentId])
+}
+
+model UserStory {
+  id         String   @id @default(cuid())
+  documentId String
+  storyCode  String
+  actor      String
+  action     String
+  benefit    String
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document       Document        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  storySentences StorySentence[]
+
+  @@index([documentId])
+}
+
+model StorySentence {
+  id                   String  @id @default(cuid())
+  storyId              String
+  sentenceId           String
+  llmVerdict           Boolean
+  confidenceScore      Float?
+  llmReason            String?
+  embeddingSimilarity  Float?
+  verificationStatus   String  @default("needs_review")
+
+  story    UserStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  sentence Sentence  @relation(fields: [sentenceId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, sentenceId])
+  @@index([sentenceId])
+}
+
+model EvaluationRun {
+  id          String   @id @default(cuid())
+  type        String
+  docCount    Int
+  metricsJson String
+  createdAt   DateTime @default(now())
+}
