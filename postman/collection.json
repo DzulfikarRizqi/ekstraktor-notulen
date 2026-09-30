@@ -1,0 +1,377 @@
+{
+  "info": {
+    "_postman_id": "de3c9be8-e6f8-47f6-9a1c-ad5d57697c7c",
+    "name": "Ekstraktor Notulen — Backend API",
+    "description": "Koleksi Postman untuk backend FastAPI...",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Buat Dokumen",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Notulen Rapat — Fitur Login\",\n  \"content\": \"Rapat Pembahasan Fitur Login.\\n\\n1. Dibuka pukul 10.00 oleh moderator.\\n2. User harus bisa login menggunakan email dan kata sandi.\\n3. Sebagai User, saya ingin mereset kata sandi melalui email agar bisa masuk lagi saat lupa.\\n4. Admin perlu melihat daftar pengguna aktif untuk memantau aktivitas.\\n5. Notulen akan dikirim melalui email kepada seluruh peserta.\\n6. Diskusi ditutup pukul 11.30.\"\n}"
+        },
+        "description": "Membuat dokumen notulen (FR-01). Konten 1–50.000 karakter. Respon 201 menyimpan `docId` ke variabel koleksi."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const res = pm.response.json();",
+              "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+              "pm.test(\"Ada id dokumen\", () => pm.expect(res.data.id).to.not.be.empty);",
+              "pm.collectionVariables.set(\"docId\", res.data.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Daftar Dokumen",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents"
+          ]
+        },
+        "description": "Menampilkan daftar dokumen urut terbaru ke terlama (FR-02)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.test(\"Berupa array data\", () => pm.expect(Array.isArray(res.data)).to.be.true);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Detail Dokumen (sebelum ekstraksi)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "{{docId}}"
+          ]
+        },
+        "description": "Detail dokumen (FR-07). Jalankan segera setelah #1 untuk melihat status `pending` (sentences & stories masih kosong)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const res = pm.response.json().data;",
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Ada field status & truncated\", () => {",
+              "  pm.expect(res.status).to.be.a(\"string\");",
+              "  pm.expect(res.truncated).to.be.a(\"boolean\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Mulai Ekstraksi",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/extract",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "{{docId}}",
+            "extract"
+          ]
+        },
+        "description": "Menjalankan job pipeline async: segmentasi → prefilter (qwen) → ekstraksi (Gemini) → verifikasi (qwen + embedding). Respon 202 `processing`. Mengeset ulang saat sedang proses → 409."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 202 processing\", () => {",
+              "  pm.response.to.have.status(202);",
+              "  pm.expect(pm.response.json().data.status).to.eql(\"processing\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Polling Hasil Ekstraksi",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "{{docId}}"
+          ]
+        },
+        "description": "Ulangi (tombol Send) tiap ~2–5 detik sampai `status: completed` atau `failed`. Saat `completed`, menyimpan `storyId` (story pertama) dan `sentenceId` (kalimat terakhir, untuk demo FR-11) ke variabel koleksi. Periksa: sentences[].index 0-based, userStories (maks 30), citations[].verificationStatus / llmVerdict / confidenceScore / embeddingSimilarity."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const res = pm.response.json().data;",
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "if (res.status === \"completed\") {",
+              "  pm.test(\"Berdasarkan spek: minimal 1 user story\", () => pm.expect(res.userStories.length).to.be.gte(1));",
+              "  pm.test(\"Berdasarkan spek: index kalimat 0-based\", () => res.sentences.forEach((s) => pm.expect(s.index).to.be.at.least(0)));",
+              "  pm.test(\"Citation pakai skema verifikasi\", () => {",
+              "    for (const u of res.userStories) for (const c of u.citations) {",
+              "      pm.expect(c.verificationStatus).to.be.oneOf([\"valid\", \"needs_review\"]);",
+              "      pm.expect(c.llmVerdict).to.be.a(\"boolean\");",
+              "    }",
+              "  });",
+              "  pm.collectionVariables.set(\"storyId\", res.userStories[0].id);",
+              "  if (res.sentences.length > 0) {",
+              "    pm.collectionVariables.set(\"sentenceId\", res.sentences[res.sentences.length - 1].id);",
+              "  }",
+              "} else if (res.status === \"failed\") {",
+              "  pm.test(\"Ada pesan error\", () => pm.expect(res.error).to.be.a(\"string\"));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Ekspor Hasil",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/export?format=md&filter=all",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "{{docId}}",
+            "export"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "md"
+            },
+            {
+              "key": "filter",
+              "value": "all"
+            }
+          ]
+        },
+        "description": "Ekspor Markdown (prob juga `format=csv`). Filter: `approved` (default), `all`, `pending`, `needs_review` (FR-13). Respon berupa file lampiran."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Header unduhan ada\", () => pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Setujui / Tolak Story",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/stories/{{storyId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "stories",
+            "{{storyId}}"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"approved\"\n}"
+        },
+        "description": "Aksi review: status `pending` → `approved`/`rejected`/`pending` (FR-09). Bisa juga mengubah actor/action/benefit (FR-10)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const res = pm.response.json().data;",
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Status berubah\", () => pm.expect(res.status).to.eql(\"approved\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Tambah Sumber Manual",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/stories/{{storyId}}/sources",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "stories",
+            "{{storyId}}",
+            "sources"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sentenceId\": \"{{sentenceId}}\"\n}"
+        },
+        "description": "Analis menautkan kalimat sumber secara manual (FR-11). Link baru berstatus `needs_review` tanpa panggilan LLM. Jika 409 (kalimat sudah tertaut), pakai id kalimat lain dari respon #5, atau lanjut ke request #9 untuk menghapusnya."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Sukses (201) atau sudah ada (409)\", () => pm.expect([201, 409]).to.include(pm.response.code));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Hapus Sumber Manual",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/stories/{{storyId}}/sources?sentenceId={{sentenceId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "stories",
+            "{{storyId}}",
+            "sources"
+          ],
+          "query": [
+            {
+              "key": "sentenceId",
+              "value": "{{sentenceId}}"
+            }
+          ]
+        },
+        "description": "Menghapus tautan kalimat dari story (FR-11)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"OK\", () => pm.expect(pm.response.json().data.ok).to.be.true);"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "docId",
+      "value": ""
+    },
+    {
+      "key": "storyId",
+      "value": ""
+    },
+    {
+      "key": "sentenceId",
+      "value": ""
+    }
+  ]
+}

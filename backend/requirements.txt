@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+sqlmodel
+openai
+google-genai
+sentence-transformers
+numpy
+httpx
+pytest

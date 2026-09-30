@@ -1,6 +1,6 @@
 # TECH SPEC — Aplikasi Ekstraksi User Story dari Notulensi Rapat Berbasis LLM dengan Penelusuran Sumber
 
-> Acuan: `.agents/1-PRD.md`. Stack: Next.js (fullstack) + SQLite (lokal) + LM Studio (model lokal). Ekstraksi = Gemini; prefilter & verifikasi = local LLM.
+> Acuan: `.agents/1-PRD.md`. Stack: Backend FastAPI (Python) + Frontend Next.js + SQLite (lokal) + LM Studio (model lokal). Ekstraksi = Gemini; prefilter & verifikasi = local LLM.
 
 ---
 
@@ -11,25 +11,26 @@
 | Layer | Technology | Versi |
 |-------|------------|-------|
 | Frontend | Next.js (App Router) | 16.x |
-| Language | TypeScript | 5.x |
+| Language (frontend) | TypeScript | 5.x |
 | Styling | Tailwind CSS | 4.x |
 | State (client) | React hooks + Server Components | - |
-| Backend | Next.js API Routes + Server Actions | 16.x |
-| Database | SQLite (file lokal, driver adapter `@prisma/adapter-better-sqlite3`) | - |
-| ORM | Prisma | 7.x (wajib driver adapter) |
-| Validasi schema | zod | 4.x (native `toJSONSchema()`) |
-| LLM API (ekstraksi) | `@google/genai` — Gemini 2.5 Flash | - |
+| Backend | **FastAPI** (Python, monorepo `backend/`) | 0.11x |
+| Language (backend) | Python | 3.12 |
+| Database | SQLite (file lokal, `sqlite:///./dev.db`) | - |
+| ORM | SQLModel (SQLAlchemy 2.x) | - |
+| Validasi schema | Pydantic v2 | 2.x |
+| LLM API (ekstraksi) | `google-genai` — Gemini 2.5 Flash | - |
 | LLM lokal (prefilter & verifikasi) | OpenAI-compatible via `openai` SDK → **LM Studio** (`http://localhost:1234/v1`) | - |
-| Embedding cadangan | `@huggingface/transformers` (Transformers.js) | 3.x |
+| Embedding cadangan | `sentence-transformers` (`intfloat/multilingual-e5-small`, python) | - |
 | Auth | Tidak ada (V1 single-user lokal) | - |
-| Hosting | Lokal (localhost, `npm run dev` / `next build && next start`) | - |
+| Hosting | Lokal (uvicorn `:8000` + `next dev :3000`, CORS) | - |
 
 ### Arsitektur Sistem
 
 Pipeline inti (satu pemanggilan Gemini untuk ekstraksi; tugas lokal di LM Studio gratis):
 
 ```
-UI (React)  →  API Route (Next.js)  →  [Job Runner in-memory]
+UI (React)  →  API (FastAPI :8000)  →  [Job Runner in-memory (thread worker)]
                                              │
         ┌────────────────────────────────────┘
         ▼
@@ -47,11 +48,11 @@ UI (React)  →  API Route (Next.js)  →  [Job Runner in-memory]
   UI: story ↔ kalimat sumber, konfidensi, review, ekspor
 ```
 
-Prinsip biaya: **hanya tahap 3 yang menyentuh API berbayar (Gemini, 1 request/dokumen)**. Tahap 2 & 4 dijalankan model lokal melalui LM Studio (gratis, tanpa limit request). Embedding (Transformers.js) hanya dipakai sebagai **sinyal cadangan** di tahap verifikasi.
+Prinsip biaya: **hanya tahap 3 yang menyentuh API berbayar (Gemini, 1 request/dokumen)**. Tahap 2 & 4 dijalankan model lokal melalui LM Studio (gratis, tanpa limit request). Embedding (`sentence-transformers`) hanya dipakai sebagai **sinyal cadangan** di tahap verifikasi.
 
 ### Kontrak Output LLM (JSON Schema)
 
-Definisi tunggal schema ditentukan di `src/lib/llm/schema.ts` (zod), lalu diubah menjadi JSON Schema via `zod-to-json-schema`. Satu sumber kebenaran dipakai silang untuk **Gemini** (`responseSchema`) dan **LM Studio/OpenAI-compatible** (`response_format.json_schema`). Tiga schema utama:
+Definisi tunggal schema ditentukan di `backend/app/llm/schema.py` (pydantic v2 → `model_json_schema()`), lalu diubah menjadi JSON Schema. Satu sumber kebenaran dipakai silang untuk **Gemini** (`response_schema`) dan **LM Studio/OpenAI-compatible** (`response_format.json_schema`). Tiga schema utama:
 
 1. **`userStoriesSchema`** — output ekstraksi (dibawah).
 2. **`prefilterSchema`** — output local LLM: `{ "relevant_sentence_ids": Array<integer> }`.
@@ -104,7 +105,7 @@ JSON Schema yang dikirim sebagai `responseSchema`:
 }
 ```
 
-Contoh output yang LAZIM (setelah validasi zod, sebelum `id` ditambahkan server):
+Contoh output yang LAZIM (setelah validasi pydantic, sebelum `id` ditambahkan server):
 
 ```json
 {
@@ -119,84 +120,62 @@ Contoh output yang LAZIM (setelah validasi zod, sebelum `id` ditambahkan server)
 }
 ```
 
-Aturan validasi saat ekstraksi: output melanggar schema → **1× repair retry** (FR-05); array > 30 → dipangkas ke 30 + `Document.truncated = true`; `source_sentence_ids` yang menunjuk index di luar rentang kalimat tetap diterima tapi menjadi `needs_review` di tahap verifikasi.
+Aturan validasi saat ekstraksi: output melanggar schema → **1× repair retry** (FR-05); array > 30 → **ditolak** (job `failed`, diminta batch ulang); `source_sentence_ids` di luar rentang kalimat → **dibuang** (tidak dibuat citation saat verifikasi).
 
 ### Struktur Folder
 
 ```text
 ekstraktor-notulen/
-├── prisma/
-│   ├── schema.prisma
-│   └── migrations/
-├── src/
+├── backend/                               # FastAPI (Python)
 │   ├── app/
-│   │   ├── page.tsx                      # Dashboard: daftar dokumen
-│   │   ├── new/page.tsx                  # Form input notulen
-│   │   ├── documents/[id]/page.tsx       # Hasil ekstraksi + review
-│   │   ├── evaluate/page.tsx             # Halaman benchmark (offline)
-│   │   └── api/
-│   │       ├── documents/
-│   │       │   ├── route.ts              # POST create, GET list
-│   │       │   └── [id]/
-│   │       │       ├── route.ts          # GET detail
-│   │       │       ├── extract/route.ts  # POST jalankan pipeline
-│   │       │       └── export/route.ts   # GET Markdown/CSV
-│   │       └── stories/
-│   │           ├── [id]/route.ts         # PATCH status / edit
-│   │           └── [id]/sources/
-│   │               └── route.ts          # POST/DELETE tautan sumber
-│   ├── lib/
-│   │   ├── db.ts                         # Prisma singleton
+│   │   ├── main.py                        # FastAPI app + CORS + lifespan init_db
+│   │   ├── core/
+│   │   │   ├── config.py                  # pydantic-settings (.env)
+│   │   │   ├── db.py                      # engine SQLModel (SQLite) + SessionLocal
+│   │   │   ├── models.py                  # ORM: Document/Sentence/UserStory/StorySentence
+│   │   │   ├── schemas.py                 # DTO camelCase + request
+│   │   │   ├── mappers.py                 # model → DTO
+│   │   │   └── http.py                    # helper respon error BAD_REQUEST/NOT_FOUND/...
 │   │   ├── llm/
-│   │   │   ├── provider.ts               # interface LLMProvider + resolver per tugas
-│   │   │   ├── gemini.ts                 # provider Gemini (responseSchema)
-│   │   │   ├── openai-compat.ts          # provider LM Studio / Groq / Together (response_format)
-│   │   │   ├── schema.ts                 # zod: userStories + prefilter + verification
-│   │   │   └── prompt.ts                 # system + user prompt builders (3 tugas)
+│   │   │   ├── provider.py                # dataclass StructuredRequest + Protocol + generateStructured
+│   │   │   ├── gemini.py                  # provider Gemini (response_schema)
+│   │   │   ├── lmstudio.py                # provider LM Studio (response_format json_schema)
+│   │   │   ├── schema.py                  # pydantic: userStories + prefilter + verification
+│   │   │   ├── prompts.py                 # system + user prompt builders (3 tugas)
+│   │   │   ├── parsing.py                 # parse_json: index min + code-fence
+│   │   │   ├── retry.py                   # with_retry (hanya LlmError retryable)
+│   │   │   └── errors.py                  # LlmError / is_retryable_status
 │   │   ├── embedding/
-│   │   │   ├── embedder.ts               # Transformers.js pipeline (cache, cadangan)
-│   │   │   └── similarity.ts             # cosine similarity
+│   │   │   ├── embedder.py                # sentence-transformers (lazy, cadangan)
+│   │   │   └── similarity.py              # cosine similarity
 │   │   ├── pipeline/
-│   │   │   ├── segmenter.ts              # Intl.Segmenter (sentence)
-│   │   │   ├── prefilter.ts              # local LLM: klasifikasi kalimat relevan
-│   │   │   ├── extraction.ts             # Gemini + validasi zod
-│   │   │   ├── verification.ts           # local LLM verdict + embedding cadangan
-│   │   │   └── pipeline.ts               # orkestrator 1→4
-│   │   └── jobs/queue.ts                 # job runner in-memory + status
-│   ├── components/
-│   │   ├── DocumentList.tsx
-│   │   ├── ExtractForm.tsx
-│   │   ├── StoryCard.tsx                 # actor/action/benefit + status
-│   │   ├── SourcePanel.tsx               # notulen + highlight kalimat
-│   │   ├── ConfidenceBadge.tsx
-│   │   └── ExportButton.tsx
-│   └── types/index.ts                    # shared types
-├── scripts/
-│   ├── model-tests/
-│   │   ├── run.ts                        # CLI uji model lokal (prefilter/verification)
-│   │   └── metrics.ts                    # akurasi, schema compliance, latency
-│   └── evaluations/
-│       ├── run.ts                        # CLI benchmark (baseline vs usulan)
-│       └── metrics.ts                    # precision/recall/F1, akurasi citation
-├── data/
-│   ├── sample_minutes/                   # contoh notulen
-│   ├── model-tests/
-│   │   ├── corpus/                       # notulen + golden prefilter/verification
-│   │   └── results/
-│   └── evaluation/
-│       ├── dataset/                      # golden + mapping sumber
-│       └── results/
-├── tests/                                # unit test pipeline services
-├── .env.example                          # GEMINI_API_KEY, LM_STUDIO_BASE_URL, dll.
+│   │   │   ├── segmenter.py               # regex sentence split (0-based index)
+│   │   │   ├── prefilter.py               # LM Studio: klasifikasi kalimat relevan
+│   │   │   ├── extraction.py              # Gemini + validasi pydantic
+│   │   │   ├── verification.py            # LM Studio verdict + embedding cadangan
+│   │   │   └── pipeline.py                # orkestrator 1→4 (thread worker)
+│   │   ├── jobs/queue.py                  # job runner in-memory (thread + queue)
+│   │   └── api/
+│   │       ├── documents.py               # POST/GET documents, extract, export
+│   │       └── stories.py                 # PATCH/DELETE story, sumber
+│   ├── tests/                             # pytest (unit + TestClient API)
+│   ├── requirements.txt
+│   └── .env.example                       # GEMINI_API_KEY, LM_STUDIO_BASE_URL, dll.
+├── frontend/                              # Next.js (UI only)
+│   ├── src/app/                           # halaman + (UI tidak memanggil API Next; → backend :8000)
+│   └── src/lib/                           # (referensi port TS → Python, DTO/dto)
+├── postman/
+│   └── collection.json                    # 9 request, baseUrl http://localhost:8000
+└── data/                                  # (rencana) sample_minutes, model-tests, evaluation
 ```
 
 ### Justifikasi
 
-- **Next.js:** satu bahasa (TypeScript) untuk UI + API; cocok demo & sidang; Server Components membuat halaman hasil cepat tanpa API tambahan.
-- **SQLite + Prisma:** tanpa server DB, file lokal, mudah dibawa/di-backup untuk keperluan skripsi; Prisma memberi type-safety.
+- **FastAPI backend + Next.js frontend:** pisah domain — backend Python ideal untuk pipeline LLM/sklearn-numpy (embedding) & job runner thread; frontend Next.js hanya UI (Server Components). Dua proses lokal (`uvicorn :8000`, `next dev :3000`) terhubung via CORS.
+- **SQLite + SQLModel:** tanpa server DB, file lokal, mudah dibawa/di-backup untuk keperluan skripsi; SQLModel memberi type-safety (Pydantic) atas SQLAlchemy.
 - **Abstraksi OpenAI-compatible:** satu client `openai` SDK untuk LM Studio (lokal) dan nanti Groq/Together/OpenRouter (API open-source) — cukup ganti `base_url`.
 - **LM Studio:** structured output via JSON schema terkonfirmasi; menjalankan prefilter & verifikasi tanpa biaya & tanpa limit request (ekstraksi tetap Gemini).
-- **Transformers.js (cadangan):** cosine similarity sebagai sinyal penunjang verifikasi — tidak butuh sidecar Python.
+- **sentence-transformers (cadangan):** cosine similarity sebagai sinyal penunjang verifikasi — model `intfloat/multilingual-e5-small` lokal (offline setelah unduh).
 
 ---
 
@@ -206,10 +185,10 @@ ekstraktor-notulen/
 
 | Item | Detail |
 |------|--------|
-| Database | SQLite (file: `prisma/dev.db`) |
-| ORM | Prisma |
+| Database | SQLite (file: `backend/dev.db`, `sqlite:///./dev.db`) |
+| ORM | SQLModel (SQLAlchemy 2.x) |
 | Pendekatan | Relasional |
-| Migrasi | `prisma migrate dev` |
+| Migrasi | `init_db()` (SQLModel.metadata.create_all di lifespan) — reset DB dev disetujui, tanpa Alembic |
 
 ### Entity Overview
 
@@ -242,7 +221,7 @@ Analis `POST /api/documents` (1) → document `pending`. `POST /api/documents/:i
 
 ## Bagian 3: Interface Design
 
-> Backend = API Routes Next.js. Frontend = Server Components + client components.
+> Backend = FastAPI (di `backend/`, prefix `/api`, port `8000`). Frontend Next.js (di `frontend/`, port `3000`) = Server Components + client components.
 
 ### API Routes
 
@@ -257,9 +236,10 @@ Analis `POST /api/documents` (1) → document `pending`. `POST /api/documents/:i
 | POST | `/api/stories/:id/sources` | Tambah tautan kalimat sumber (FR-11) | N/A |
 | DELETE | `/api/stories/:id/sources?sentenceId=` | Hapus tautan kalimat sumber (FR-11) | N/A |
 
-Detail request/response didefinisikan saat implementasi. Konvensi:
-- Error → `{ "error": { "code", "message" } }` dengan status HTTP sesuai (400/404/409/429).
-- DTO di `src/types/index.ts` (berbagi antara server & client).
+Detail request/response mengikuti Postman (`postman/collection.json`). Konvensi:
+- Success → `{ "data": ... }`.
+- Error → `{ "error": { "code", "message" } }` dengan status HTTP sesuai: 400/404/409/422 (`CONTENT_TOO_LONG`).
+- DTO camelCase di `backend/app/core/schemas.py` (sesuai DTO TypeScript lama di `frontend/src/types/index.ts`).
 
 ### Halaman
 
@@ -280,11 +260,11 @@ Detail request/response didefinisikan saat implementasi. Konvensi:
 
 ### Alur: Ekstraksi (FR-03 s.d. FR-06)
 1. `POST /api/documents/:id/extract` set status `processing`, enqueue job.
-2. **Segmenter:** pecah `content` jadi kalimat via `Intl.Segmenter('id', { granularity: 'sentence' })`; simpan `Sentence(index, text)`.
+2. **Segmenter:** pecah `content` jadi kalimat via split regex (titik/!?/… + spasi) dengan normalisasi `\r\n` & spasi berlebih; simpan `Sentence(index, text)` (index 0-based).
 3. **Prefilter (local LLM):** kirim daftar kalimat bernomor (index 0-based) ke LM Studio; schema `prefilterSchema` memaksa output JSON `{ "relevant_sentence_ids": [...] }`. Prompt memakai bias inklusif *("jika ragu, sertakan")* dan aturan anti-halusinasi *(hanya nomor yang ada di input)*. Kalimat di luar daftar dibuang dari prompt ekstraksi, **nomor index asli tetap dipertahankan**. Jika output kosong/tidak valid → fallback: semua kalimat dipakai.
-4. **Ekstraksi (Gemini):** bangun prompt berisi kalimat tersaring + nomor index; panggil Gemini 2.5 Flash sekali, `responseMimeType: application/json` + `responseSchema`; validasi output dengan zod.
+4. **Ekstraksi (Gemini):** bangun prompt berisi kalimat tersaring + nomor index; panggil Gemini 2.5 Flash sekali, `response_mime_type: application/json` + `response_schema`; validasi output dengan pydantic.
    - Jika JSON/schema tidak valid → **1× repair retry** (prompt error-balancing). Jika tetap gagal → status `failed`.
-   - Jika array story `> 30` → potong ke 30, set `Document.truncated = true`.
+   - Jika array story `> 30` → ditolak (minta batch ulang); tidak ada pemangkasan diam-diam.
 5. **Verifikasi (local LLM + embedding cadangan):** untuk tiap `(user_story, kalimat sumber)`, minta LM Studio memberi `verificationSchema` → `{ is_valid, confidence_score, reason }`. Paralel, hitung juga `cosine(story, kalimat)` via embedding cadangan. Prompt verifikasi memuat aturan *coverage-gap* (klaim yang membutuhkan kalimat di luar acuan → turunkan skor) dan *"benefit kosong bukan kekurangan"*. Penggabungan putusan di backend:
    - `is_valid=false` ATAU `confidence_score < CONF_THRESHOLD` (default 0.6) → `needs_review`.
    - `is_valid=true` + embedding tinggi (≥ `EMBED_VERIFY_THRESHOLD`, default 0.5) → `valid`.
@@ -334,49 +314,53 @@ Aturan status final (`verificationStatus`) dihitung di backend:
 ### Business Rules (dari PRD)
 - Persis **1 pemanggilan Gemini per dokumen** (kecuali 1× repair retry saat output tidak valid).
 - Gemini 429/5xx → exponential backoff + retry; terus gagal → `failed`.
-- Cap 30 story; output lebih → potong + `truncated=true`.
+- Cap 30 story; output lebih → ditolak (batch ulang; tidak ada pemangkasan diam-diam).
 - Prefilter & verifikasi dijalankan **model lokal (LM Studio)** — gratis; bila LM Studio tidak aktif → job `failed` dengan pesan jelas.
-- Embedding cadangan hanya menurunkan `valid → needs_review`, tidak pernah menaikkan putusan LLM.
+- Embedding cadangan (`sentence-transformers`) hanya menurunkan `valid → needs_review`, tidak pernah menaikkan putusan LLM.
 - Story tanpa sumber tetap bisa disetujui oleh analis.
-- Hanya `approved` story yang diekspor dalam mode default (filter "semua" tersedia).
+- Hanya `approved` story yang diekspor dalam mode default (filter "semua"/"pending"/"needs_review" tersedia).
 
 ---
 
 ## Bagian 5: Keamanan, Performa, & Deployment
 
 ### Keamanan
-- `GEMINI_API_KEY` hanya di `.env.local`; **tidak pernah** dikirim ke client (client API hanya dari server).
+- `GEMINI_API_KEY` hanya di `backend/.env`; **tidak pernah** dikirim ke client (client hanya memanggil API backend lokal).
 - Validasi panjang input di server (50.000 karakter) — anti input raksasa.
 - Hanya index kalimat yang terverifikasi milik dokumen tersebut yang diterima saat kelola sumber.
-- `.env.local`, `prisma/dev.db`, dan hasil uji/benchmark masuk `.gitignore` (template: `data/model-tests/results/`, `data/evaluation/results/`).
+- `.env`, `.venv/`, `*.db`, dan hasil uji/benchmark masuk `.gitignore`.
 
 ### Performa
-- Pipeline 1 notulen (≤5.000 karakter) target < 60 detik s.d. story tampil (dengan embedded job berjalan paralel).
-- Jalankan pipeline di **job runner asinkron** (in-memory queue) agar request API cepat balik; UI memakai polling status ringan (mis. interval 2s s.d. `completed`).
+- Pipeline 1 notulen (≤5.000 karakter) target < 60 detik s.d. story tampil (dengan job thread berjalan paralel).
+- Jalankan pipeline di **job runner asinkron** (in-memory thread queue) agar request API cepat balik; UI memakai polling status ringan (mis. interval 2s s.d. `completed`).
 - Panjang baris prompt dijaga: prefilter memangkas kalimat tidak relevan → token prompt Gemini lebih hemat & fokus.
-- Embedding cadangan Transformers.js dimuat sekali (singleton) dan di-cache per dokumen; bila `USE_EMBEDDING_FALLBACK=false`, tahap embedding dilewati (tanpa dampak ke alur utama).
+- Embedding `sentence-transformers` dimuat sekali (lazy singleton) dan di-cache per dokumen; bila `USE_EMBEDDING_FALLBACK=false`, tahap embedding dilewati (tanpa dampak ke alur utama).
 - Verifikasi local LLM berjalan per citation; pada dokumen dengan banyak story, proses bisa di-batch agar latency turun.
-- Halaman hasil memakai Server Components → muat `< 2s`; operasi non-LLM `< 500ms`.
 
 ### Deployment (Lokal)
-- Dev: `npm install && npx prisma generate && npm run dev`
-- Prod lokal: `npm run build && npm run start`
-- Prisma migrate: `npx prisma migrate dev`
-- Uji model lokal: `npm run model-test -- --task prefilter --model qwen2.5-3b` (lihat `scripts/model-tests/`)
-- Jalankan benchmark: `npm run evaluate -- --type proposed --dataset data/evaluation/dataset`
+- Dev: `python -m venv .venv && .venv/bin/pip install -r requirements.txt && cp .env.example .env` lalu `.venv/bin/uvicorn app.main:app --port 8000` (di `backend/`).
+- Frontend: `npm install && npm run dev` (di `frontend/`, port 3000).
+- Tes: `.venv/bin/python -m pytest` (di `backend/`).
+- Uji model lokal: `scripts/model-tests/` (rencana, belum dibuat).
 
 ### Development Setup
 
 ```bash
-cp .env.example .env.local          # isi GEMINI_API_KEY + LM_STUDIO_BASE_URL
-# Jalankan LM Studio → tab Developer → Start Server (http://localhost:1234)
+# Backend (terminal 1)
+cd backend
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env                 # isi GEMINI_API_KEY + LM_STUDIO_BASE_URL
+.venv/bin/python -m pytest            # uji (tanpa perlu layanan eksternal)
+.venv/bin/uvicorn app.main:app --port 8000
+
+# Frontend (terminal 2, opsional utk sekarang)
+cd frontend && npm install && npm run dev   # http://localhost:3000
+
+# LM Studio wajib dijalankan berbarengan:
 # Load model lokal (mis. qwen2.5-3b) sebelum pipeline dipakai
-npm install
-npx prisma migrate dev              # buat skema + sqlite
-npm run dev                         # http://localhost:3000
 ```
 
-> Catatan: `@huggingface/transformers` mengunduh model embedding pada pemakaian pertama (tersimpan di cache lokal; offline setelahnya). Ukuran model ±90–460 MB — sekali unduh saat setup.
+> Catatan: `sentence-transformers` mengunduh model embedding `intfloat/multilingual-e5-small` pada pemakaian pertama (cache lokal; offline setelahnya). Ukuran model ±460 MB — sekali unduh saat setup (`backend/.venv` perlu `torch` CPU; lihat `requirements.txt`).
 
 ---
 
