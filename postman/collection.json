@@ -7,7 +7,36 @@
   },
   "item": [
     {
-      "name": "1. Buat Dokumen",
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Smoke test paling awal. Backend hidup? Gemini API key terbaca (config.py validate_required) dan LM Studio sudah jalan? Kalau 500 dengan pesan 'GEMINI_API_KEY wajib diisi', perbaiki backend/.env lalu restart uvicorn. Untuk memastikan LM Studio, cek juga POST #5 tidak berakhir status=failed."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Backend hidup\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Buat Dokumen",
       "request": {
         "method": "POST",
         "header": [
@@ -28,7 +57,7 @@
         },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"title\": \"Notulen Rapat — Fitur Login\",\n  \"content\": \"Rapat Pembahasan Fitur Login.\\n\\n1. Dibuka pukul 10.00 oleh moderator.\\n2. User harus bisa login menggunakan email dan kata sandi.\\n3. Sebagai User, saya ingin mereset kata sandi melalui email agar bisa masuk lagi saat lupa.\\n4. Admin perlu melihat daftar pengguna aktif untuk memantau aktivitas.\\n5. Notulen akan dikirim melalui email kepada seluruh peserta.\\n6. Diskusi ditutup pukul 11.30.\"\n}"
+          "raw": "{\n  \"title\": \"Notulen Rapat — Sistem Antrean Klinik\",\n  \"content\": \"Notulen Rapat Koordinasi — Sistem Antrean Klinik, dibuka pukul 09.00 oleh ketua komite. Hadirin tim IT, Petugas Pendaftaran, dan Supervisor.\\n\\nPasien ingin bisa mendaftar dan mengambil nomor antrean langsung dari smartphone tanpa harus datang lebih awal ke klinik. Supaya waktu tunggu di ruang tunggu bisa jauh lebih singkat.\\n\\nPetugas pendaftaran harus bisa memanggil pasien berikutnya secara otomatis lewat monitor dan pengeras suara. Jadi supaya salah panggil nomor antrean bisa diminimalkan.\\n\\nSupervisor perlu melihat laporan rekap jumlah pasien yang dilayani per hari beserta rata-rata waktu tunggunya. Supaya jumlah petugas pendaftaran bisa diatur sesuai kebutuhan.\\n\\nPasien juga meminta supaya bisa membatalkan nomor antrean secara daring kalau ternyata tidak jadi datang.\\n\\nIntegrasi dengan sistem BPJS ditunda untuk dibahas pada rapat berikutnya karena jawabannya belum final. Diskusi ditutup pukul 11.00.\"\n}"
         },
         "description": "Membuat dokumen notulen (FR-01). Konten 1–50.000 karakter. Respon 201 menyimpan `docId` ke variabel koleksi."
       },
@@ -48,7 +77,7 @@
       ]
     },
     {
-      "name": "2. Daftar Dokumen",
+      "name": "3. Daftar Dokumen",
       "request": {
         "method": "GET",
         "header": [],
@@ -79,7 +108,7 @@
       ]
     },
     {
-      "name": "3. Detail Dokumen (sebelum ekstraksi)",
+      "name": "4. Detail Dokumen (sebelum ekstraksi)",
       "request": {
         "method": "GET",
         "header": [],
@@ -94,7 +123,7 @@
             "{{docId}}"
           ]
         },
-        "description": "Detail dokumen (FR-07). Jalankan segera setelah #1 untuk melihat status `pending` (sentences & stories masih kosong)."
+        "description": "Detail dokumen (FR-07). Jalankan segera setelah #2 untuk melihat status `pending` (sentences & stories masih kosong)."
       },
       "event": [
         {
@@ -114,7 +143,7 @@
       ]
     },
     {
-      "name": "4. Mulai Ekstraksi",
+      "name": "5. Mulai Ekstraksi",
       "request": {
         "method": "POST",
         "header": [],
@@ -148,7 +177,7 @@
       ]
     },
     {
-      "name": "5. Polling Hasil Ekstraksi",
+      "name": "6. Polling Hasil Ekstraksi",
       "request": {
         "method": "GET",
         "header": [],
@@ -195,7 +224,7 @@
       ]
     },
     {
-      "name": "6. Ekspor Hasil",
+      "name": "7. Ekspor Hasil",
       "request": {
         "method": "GET",
         "header": [],
@@ -237,7 +266,50 @@
       ]
     },
     {
-      "name": "7. Setujui / Tolak Story",
+      "name": "8. Ekspor CSV",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/export?format=csv&filter=all",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "documents",
+            "{{docId}}",
+            "export"
+          ],
+          "query": [
+            {
+              "key": "format",
+              "value": "csv"
+            },
+            {
+              "key": "filter",
+              "value": "all"
+            }
+          ]
+        },
+        "description": "Ekspor CSV (FR-13). Kolom: story_code, actor, action, benefit, status, source_indices. `source_indices` memakai indeks kalimat 0-based yang dipisah titik koma."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Header unduhan ada\", () => pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\"));",
+              "pm.test(\"Ada header kolom\", () => pm.expect(pm.response.text()).to.include(\"story_code,actor,action,benefit,status,source_indices\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Setujui / Tolak Story",
       "request": {
         "method": "PATCH",
         "header": [
@@ -278,7 +350,38 @@
       ]
     },
     {
-      "name": "8. Tambah Sumber Manual",
+      "name": "10. Hapus Story",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/stories/{{storyId}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "stories",
+            "{{storyId}}"
+          ]
+        },
+        "description": "Menghapus satu user story beserta citation-nya (cascade delete, FR-09). Jalankan setelah #9 bila ingin mencoba filter `approved` pada #7 — tanpa ini semua story berstatus `pending` sehingga export `approved` kosong."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"OK\", () => pm.expect(pm.response.json().data.ok).to.be.true);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Tambah Sumber Manual",
       "request": {
         "method": "POST",
         "header": [
@@ -318,7 +421,7 @@
       ]
     },
     {
-      "name": "9. Hapus Sumber Manual",
+      "name": "12. Hapus Sumber Manual",
       "request": {
         "method": "DELETE",
         "header": [],
@@ -354,6 +457,105 @@
           }
         }
       ]
+    },
+    {
+      "name": "13a. Combined — One-Shot Extract",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/extract?wait=90",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "extract"],
+          "query": [{ "key": "wait", "value": "90" }]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"content\": \"Pasien ingin daftar online. Petugas panggil nomor otomatis. Supervisor lihat laporan harian.\"\n}"
+        },
+        "description": "Satu request: buat dokumen + 4 tahap + hasil. Pakai ?wait=90 untuk menunggu hasil. Respons 200 = DocumentDto lengkap. Tanpa ?wait = 202 async."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const s = pm.response.code;",
+              "pm.test(\"Status 200/202\", () => pm.expect(s).to.be.oneOf([200, 202]));",
+              "if (s === 200) {",
+              "  pm.test(\"Ada userStories\", () => pm.expect(pm.response.json().data.userStories).to.be.an('array').that.is.not.empty);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13b. Stages — Segment",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/stages/segment",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{docId}}", "stages", "segment"]
+        },
+        "description": "Tahap 1/4: segmentasi teks menjadi kalimat (regex, tanpa LLM). Lihat juga console uvicorn untuk log [segment]."
+      }
+    },
+    {
+      "name": "13c. Stages — Prefilter",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/stages/prefilter",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{docId}}", "stages", "prefilter"]
+        },
+        "description": "Tahap 2/4: LM Studio menyaring kalimat relevan. Respon: relevantIndices, droppedIndices, sentences[].isRelevant. Console: log [prefilter] dengan jumlah lolos/dibuang."
+      }
+    },
+    {
+      "name": "13d. Stages — Extract",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/stages/extract",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{docId}}", "stages", "extract"]
+        },
+        "description": "Tahap 3/4: Gemini mengekstrak User Story. Hasil: userStories[] dengan actor/action/benefit/sourceIndices. Citations BELUM diverifikasi (llmReason null). Lanjutkan ke verify."
+      }
+    },
+    {
+      "name": "13e. Stages — Verify",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/stages/verify",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{docId}}", "stages", "verify"]
+        },
+        "description": "Tahap 4/4: LM Studio memverifikasi setiap citation. Hasil: verifiedCount, skippedCount, citations[] dengan verificationStatus, confidenceScore, llmReason. Idempotent — bisa dijalankan ulang."
+      }
+    },
+    {
+      "name": "14. Ekstraksi dengan Wait",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{docId}}/extract?wait=120",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{docId}}", "extract"],
+          "query": [{ "key": "wait", "value": "120" }]
+        },
+        "description": "Tambahan di endpoint /extract yang sudah ada: tambahkan ?wait=N (N maks 300) untuk menunggu hasil. 200 = DocumentDto, 202 = async timeout."
+      }
     }
   ],
   "variable": [

@@ -1,0 +1,272 @@
+{
+  "info": {
+    "name": "Ekstraktor Notulen — MVP",
+    "description": "Koleksi minimum untuk membuktikan pipeline 4 tahap (segmentasi → prefilter → ekstraksi → verifikasi) bekerja. Digunakan bersama endpoint gabungan.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "documentId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Pastikan backend, Gemini API key, dan LM Studio sudah berjalan."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Backend hidup\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Buat Dokumen",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Notulen Rapat — Sistem Antrean Klinik\",\n  \"content\": \"Pasien ingin bisa mendaftar dan mengambil nomor antrean langsung dari smartphone tanpa harus datang lebih awal ke klinik. Supaya waktu tunggu di ruang tunggu bisa jauh lebih singkat.\\n\\nPetugas pendaftaran harus bisa memanggil pasien berikutnya secara otomatis lewat monitor dan pengeras suara. Jadi supaya salah panggil nomor antrean bisa diminimalkan.\\n\\nSupervisor perlu melihat laporan rekap jumlah pasien yang dilayani per hari beserta rata-rata waktu tunggunya.\"\n}"
+        },
+        "description": "Input teks notulen. Dari respons, simpan `id` ke variabel koleksi `documentId`."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 201\", () => pm.response.to.have.status(201));",
+              "const d = pm.response.json().data;",
+              "pm.test(\"Mendapat id\", () => pm.expect(d.id).to.be.a('string'));",
+              "pm.collectionVariables.set('documentId', d.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Tahap 1 — Segmentasi",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{documentId}}/stages/segment",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{documentId}}", "stages", "segment"]
+        },
+        "description": "Tahap 1/4. Regex memecah teks menjadi kalimat. Hasil: `count` + daftar `sentences[]` dengan index & text.\n\nKeberhasilan: lebih dari 0 kalimat dihasilkan."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "const d = pm.response.json().data;",
+              "pm.test(\"Ada kalimat\", () => pm.expect(d.count).to.be.greaterThan(0));",
+              "pm.test(\"Daftar sentences ada\", () => pm.expect(d.sentences).to.be.an('array').that.is.not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Tahap 2 — Prefilter",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{documentId}}/stages/prefilter",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{documentId}}", "stages", "prefilter"]
+        },
+        "description": "Tahap 2/4. LM Studio (local LLM) menyaring kalimat yang relevan dengan kebutuhan sistem. Hasil: `relevantIndices` (index yang lolos), `droppedIndices` (yang dibuang), `sentences[].isRelevant`.\n\nPerhatikan: kalimat pembuka/penutup/basa-basi biasanya dibuang di tahap ini.\n\nConsole uvicorn: log `[prefilter] doc=xxxx 12 -> 9 lolos, 3 dibuang [...]`."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "const d = pm.response.json().data;",
+              "pm.test(\"Ada relevantIndices\", () => pm.expect(d.relevantIndices).to.be.an('array'));",
+              "pm.test(\"Ada isRelevant\", () => pm.expect(d.sentences[0]).to.have.property('isRelevant'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Tahap 3 — Ekstraksi",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{documentId}}/stages/extract",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{documentId}}", "stages", "extract"]
+        },
+        "description": "Tahap 3/4. Gemini (cloud LLM) mengekstrak User Story dari kalimat yang lolos prefilter. Hasil: `userStories[]` dengan actor, action, benefit, sourceIndices.\n\nPerhatikan: citations di user stories BELUM diverifikasi — `llmReason` dan `confidenceScore` masih null. Lanjut ke tahap Verifikasi."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "const d = pm.response.json().data;",
+              "pm.test(\"Ada user stories\", () => pm.expect(d.userStories).to.be.an('array').that.is.not.empty);",
+              "pm.test(\"Actor terisi\", () => pm.expect(d.userStories[0].actor).to.be.a('string').that.is.not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Tahap 4 — Verifikasi",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{documentId}}/stages/verify",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{documentId}}", "stages", "verify"]
+        },
+        "description": "Tahap 4/4. LM Studio memverifikasi setiap pasangan (user story, kalimat sumber). Hasil: `citations[]` dengan `verificationStatus` (valid/needs_review), `confidenceScore`, `llmReason`, `embeddingSimilarity`.\n\nJika dijalankan ulang, verifiedCount=0 dan skippedCount=total — verifikasi idempotent, tidak boros token."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "const d = pm.response.json().data;",
+              "pm.test(\"Ada verifiedCount\", () => pm.expect(d.verifiedCount).to.be.a('number'));",
+              "pm.test(\"Citations terisi\", () => pm.expect(d.citations).to.be.an('array').that.is.not.empty);",
+              "pm.test(\"Semua citation terverifikasi\", () => {\n  d.citations.forEach(c => {\n    pm.expect(c.llmReason, c.storyCode).to.be.a('string').that.is.not.empty;\n    pm.expect(c.verificationStatus, c.storyCode).to.be.oneOf(['valid', 'needs_review']);\n  });\n});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Lihat Hasil Lengkap",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{documentId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{documentId}}"]
+        },
+        "description": "Tampilkan hasil lengkap setelah 4 tahap: sentences (dengan isRelevant), userStories (dengan semua citation termasuk verification)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+              "const d = pm.response.json().data;",
+              "pm.test(\"Status completed\", () => pm.expect(d.status).to.eql('completed'));",
+              "pm.test(\"Ada sentences\", () => pm.expect(d.sentences).to.be.an('array').that.is.not.empty);",
+              "pm.test(\"Ada userStories\", () => pm.expect(d.userStories).to.be.an('array').that.is.not.empty);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. One-Shot (Gabungan)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/extract?wait=90",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "extract"],
+          "query": [{ "key": "wait", "value": "90" }]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"content\": \"Admin harus bisa login. Kasir cetak laporan harian. Supervisor lihat statistik mingguan.\"\n}"
+        },
+        "description": "Satu request: buat dokumen + jalankan 4 tahap + tunggu hasil. Pakai `?wait=90` untuk menunggu maksimal 90 detik. Respons: DocumentDto lengkap (sentences + userStories + citations).\n\nTanpa `?wait`: 202 async, polling dokumen ID di response. Dengan `?wait`: 200 dan hasil langsung."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const s = pm.response.code;",
+              "pm.test(\"Status 200 atau 202\", () => pm.expect(s).to.be.oneOf([200, 202]));",
+              "if (s === 200) {",
+              "  const d = pm.response.json().data;",
+              "  pm.test(\"Hasil lengkap diterima\", () => pm.expect(d.userStories).to.be.an('array').that.is.not.empty);",
+              "} else {",
+              "  pm.test(\"DocumentId diterima\", () => pm.expect(pm.response.json().data.documentId).to.be.a('string'));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Ekstraksi Async (Lama)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/documents/{{documentId}}/extract",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "documents", "{{documentId}}", "extract"]
+        },
+        "description": "Jalankan penuh secara async (202). Berguna sebagai fallback kalau `?wait=` timeout. Setelah ini, polling GET #7 sampai status=completed."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Status 202\", () => pm.response.to.have.status(202));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

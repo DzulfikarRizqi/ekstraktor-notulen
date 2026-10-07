@@ -57,6 +57,7 @@ export async function runPipeline(documentId: string): Promise<void> {
 
   const verdicts = await verifyStories(
     stories.map((st, i) => ({
+      id: i,
       key: createdStories[i].id,
       actor: st.actor,
       action: st.action,

@@ -1,5 +1,7 @@
+from sqlmodel import select
+
 from app.core.db import SessionLocal
-from app.core.models import Document, Sentence, UserStory
+from app.core.models import Document, Sentence, StorySentence, UserStory
 
 
 def _seed():
@@ -52,6 +54,29 @@ def test_delete_story(client):
     assert res.status_code == 200
     assert res.json()["data"] == {"ok": True}
     assert client.get(f"/api/documents/{seed['doc'].id}").json()["data"]["userStories"] == []
+
+
+def test_delete_story_with_citation_cascades(client):
+    """Story hasil pipeline selalu punya citation; cascade harus ikut menghapus."""
+    seed = _seed()
+    with SessionLocal() as db:
+        link = StorySentence(
+            story_id=seed["story"].id,
+            sentence_id=seed["sent"].id,
+            llm_verdict=True,
+            verification_status="valid",
+        )
+        db.add(link)
+        db.commit()
+
+    res = client.delete(f"/api/stories/{seed['story'].id}")
+    assert res.status_code == 200
+    assert res.json()["data"] == {"ok": True}
+
+    with SessionLocal() as db:
+        assert db.exec(
+            select(StorySentence).where(StorySentence.story_id == seed["story"].id)
+        ).all() == []
 
 
 def test_add_source_ok(client):

@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import documents, stories
 from app.core.db import init_db
+from app.core.logging import setup_logging
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    setup_logging()
     init_db()
     yield
 

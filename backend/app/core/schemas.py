@@ -18,6 +18,7 @@ class SentenceDto(BaseModel):
     id: str
     index: int
     text: str
+    isRelevant: Optional[bool] = None
 
 
 class CitationDto(BaseModel):

@@ -67,6 +67,7 @@ def test_reject_more_than_30_stories():
 def test_prefilter_and_verification_schemas():
     assert PrefilterSchema.model_validate({"relevant_sentence_ids": [1, 2]}).relevant_sentence_ids == [1, 2]
     v = VerificationSchema.model_validate(
-        {"is_valid": True, "confidence_score": 0.98, "reason": "ok"}
+        {"user_story_id": 0, "is_valid": True, "confidence_score": 0.98, "reason": "ok"}
     )
     assert v.is_valid is True
+    assert v.user_story_id == 0

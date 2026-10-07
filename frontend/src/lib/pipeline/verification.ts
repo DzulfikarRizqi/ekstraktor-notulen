@@ -15,6 +15,7 @@ import { parseJson } from "@/lib/llm/parse";
 import type { VerificationStatus } from "@/types";
 
 export interface StoryToVerify {
+  id: number;
   key: string;
   actor: string;
   action: string;
@@ -92,7 +93,7 @@ export async function verifyStories(
       const { system, user } = buildVerificationPrompt({
         sentenceIndex: sourceIndex,
         sentenceText: sentence.text,
-        story,
+        story: { id: story.id, actor: story.actor, action: story.action, benefit: story.benefit },
       });
 
       const raw = await generateStructured(

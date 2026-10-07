@@ -29,6 +29,7 @@ class PrefilterSchema(BaseModel):
 
 
 class VerificationSchema(BaseModel):
+    user_story_id: int = Field(ge=0)
     is_valid: bool
     confidence_score: float = Field(ge=0, le=1)
     reason: str

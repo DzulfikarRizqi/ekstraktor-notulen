@@ -12,12 +12,14 @@ def _patch_pipeline(monkeypatch):
     async def fake_extract(provider, sentences):
         results = [
             {
+                "id": 0,
                 "actor": "Admin",
                 "action": "setiap hari mencetak laporan",
                 "benefit": "",
                 "source_sentence_ids": [0],
             },
             {
+                "id": 1,
                 "actor": "Kasir",
                 "action": "scan barcode pakai alat genggam",
                 "benefit": "mengurangi antrean",

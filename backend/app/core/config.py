@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     lm_studio_base_url: str = "http://localhost:1234/v1"
-    lm_studio_model: str = "qwen2.5-3b"
+    lm_studio_model: str = "qwen2.5-3b-instruct"
     conf_threshold: float = 0.6
     embed_verify_threshold: float = 0.5
     use_embedding_fallback: bool = True

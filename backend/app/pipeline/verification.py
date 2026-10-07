@@ -9,11 +9,12 @@ from app.llm.schema import VerificationSchema
 VERIFICATION_SCHEMA = {
     "type": "object",
     "properties": {
+        "user_story_id": {"type": "integer", "minimum": 0},
         "is_valid": {"type": "boolean"},
         "confidence_score": {"type": "number", "minimum": 0, "maximum": 1},
         "reason": {"type": "string"},
     },
-    "required": ["is_valid", "confidence_score", "reason"],
+    "required": ["user_story_id", "is_valid", "confidence_score", "reason"],
     "additionalProperties": False,
 }
 

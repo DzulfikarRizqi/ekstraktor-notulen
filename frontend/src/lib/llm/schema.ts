@@ -16,6 +16,7 @@ export const prefilterSchema = z.object({
 });
 
 export const verificationSchema = z.object({
+  user_story_id: z.number().int().min(0),
   is_valid: z.boolean(),
   confidence_score: z.number().min(0).max(1),
   reason: z.string(),

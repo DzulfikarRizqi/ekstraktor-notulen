@@ -88,6 +88,7 @@ describe("kontrak schema LLM", () => {
     ).toBe(true);
     expect(
       verificationSchema.safeParse({
+        user_story_id: 0,
         is_valid: true,
         confidence_score: 0.98,
         reason: "ok",

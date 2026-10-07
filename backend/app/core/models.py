@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Column, Float, Integer, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Float, Integer, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -26,8 +26,14 @@ class Document(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
-    sentences: list["Sentence"] = Relationship(back_populates="document")
-    user_stories: list["UserStory"] = Relationship(back_populates="document")
+    sentences: list["Sentence"] = Relationship(
+        back_populates="document",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    user_stories: list["UserStory"] = Relationship(
+        back_populates="document",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
 
 class Sentence(SQLModel, table=True):
@@ -40,6 +46,7 @@ class Sentence(SQLModel, table=True):
     document_id: str = Field(foreign_key="documents.id", index=True)
     index: int = Field(sa_column=Column(Integer))
     text: str = Field(sa_column=Column(Text))
+    is_relevant: Optional[bool] = Field(default=None, sa_column=Column(Boolean, nullable=True))
 
     document: Optional[Document] = Relationship(back_populates="sentences")
     story_sentences: list["StorySentence"] = Relationship(
@@ -60,7 +67,8 @@ class UserStory(SQLModel, table=True):
 
     document: Optional[Document] = Relationship(back_populates="user_stories")
     story_sentences: list["StorySentence"] = Relationship(
-        back_populates="story"
+        back_populates="story",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
 
 

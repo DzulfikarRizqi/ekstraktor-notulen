@@ -16,6 +16,7 @@ from app.llm.schema import (
 
 
 class StoryResult(TypedDict):
+    id: int
     actor: str
     action: str
     benefit: str
@@ -72,6 +73,7 @@ async def extract_stories(
         seen.add(key)
         results.append(
             {
+                "id": len(results),
                 "actor": story.actor,
                 "action": story.action,
                 "benefit": story.benefit,

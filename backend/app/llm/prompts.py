@@ -37,16 +37,18 @@ PREFILTER_EXAMPLE_INPUT = """[0] Selamat pagi semuanya.
 [2] Nanti user harus bisa reset password via email.
 [3] Ya sudah, mari kita makan siang."""
 
-PREFILTER_EXAMPLE_OUTPUT = '{"relevant_sentence_ids": [1, 2]}'
+PREFILTER_EXAMPLE_OUTPUT = """{
+  "relevant_sentence_ids": [1, 2]
+}"""
 
 
 def build_prefilter_prompt(sentences: list[IndexedSentence]) -> dict[str, str]:
     user = "\n".join(
         [
-            "CONTOH INPUT:",
+            "=== CONTOH INPUT ===",
             PREFILTER_EXAMPLE_INPUT,
             "",
-            "CONTOH OUTPUT:",
+            "=== CONTOH OUTPUT ===",
             PREFILTER_EXAMPLE_OUTPUT,
             "",
             "=== INPUT NYATA ===",
@@ -69,7 +71,8 @@ ATURAN KETAT:
 2. DILARANG mengarang kebutuhan sistem yang tidak disebutkan dalam teks.
 3. Field "actor", "action", dan "benefit" harus diekstrak dari teks. Jika "benefit" tidak disebutkan, isi dengan string kosong "".
 4. Field "source_sentence_ids" WAJIB berisi array angka indeks kalimat (dimulai dari 0) yang menjadi sumber bukti User Story tersebut. HANYA boleh mengutip nomor indeks yang terdapat pada daftar masukan.
-5. Dilarang membuat User Story yang isinya identik (duplikat) dengan story lain."""
+5. Dilarang membuat User Story yang isinya identik (duplikat) dengan story lain.
+6. HANYA boleh mengutip angka indeks yang secara eksplisit tertulis di dalam daftar masukan. """
 
 EXTRACTION_EXAMPLE_INPUT = """[0] Selamat siang semuanya, terima kasih sudah hadir di rapat kick-off aplikasi perpustakaan ini.
 [1] Langsung saja, dari sisi mahasiswa, saya ingin mereka bisa meminjam buku secara online.
@@ -106,10 +109,10 @@ EXTRACTION_EXAMPLE_OUTPUT = """{
 def build_extraction_prompt(sentences: list[IndexedSentence]) -> dict[str, str]:
     user = "\n".join(
         [
-            "=== INPUT CONTOH ===",
+            "=== CONTOH INPUT ===",
             EXTRACTION_EXAMPLE_INPUT,
             "",
-            "=== OUTPUT CONTOH ===",
+            "=== CONTOH OUTPUT ===",
             EXTRACTION_EXAMPLE_OUTPUT,
             "",
             "=== INPUT NYATA ===",
@@ -143,15 +146,46 @@ ATURAN:
 2. Jika klaim pada User Story membutuhkan kalimat lain DI LUAR Kalimat Acuan yang diberikan agar sepenuhnya didukung, tandai TIDAK sepenuhnya valid (is_valid: false) atau turunkan confidence_score.
 3. Jika "benefit" pada User Story kosong, itu BUKAN kekurangan — jangan menandai invalid hanya karena benefit kosong.
 4. Bersikap konservatif: jangan mengiyakan bila bukti tidak jelas.
-5. Keluarkan HANYA JSON dengan format:
+5. Setiap laporan mengacu ke SATU user story: satu objek JSON untuk satu "user_story_id" yang persis sama dengan "User Story ID" pada input, berapa pun jumlah source sentence milik story tersebut. Jangan menggabungkan beberapa user story dalam satu laporan.
+6. Keluarkan HANYA JSON dengan format:
 {
+  "user_story_id": 0,
   "is_valid": true/false,
   "confidence_score": 0.0 - 1.0,
   "reason": "Alasan singkat"
 }"""
 
+VERIFICATION_EXAMPLE_VALID_INPUT = """User Story ID: 0
+Kalimat Acuan: "[3] Kasir bisa langsung scan barcode barang pakai scanner genggam."
+User Story Gemini:
+- Actor: Kasir
+- Action: scan barcode barang
+- Benefit: -"""
+
+VERIFICATION_EXAMPLE_VALID_OUTPUT = """{
+  "user_story_id": 0,
+  "is_valid": true,
+  "confidence_score": 0.98,
+  "reason": "Sesuai dengan sumber."
+}"""
+
+VERIFICATION_EXAMPLE_INVALID_INPUT = """User Story ID: 1
+Kalimat Acuan: "[2] Kita bahas soal jadwal rapat minggu depan."
+User Story Gemini:
+- Actor: Admin
+- Action: menambahkan buku baru
+- Benefit: -"""
+
+VERIFICATION_EXAMPLE_INVALID_OUTPUT = """{
+  "user_story_id": 1,
+  "is_valid": false,
+  "confidence_score": 0.05,
+  "reason": "Kalimat berisi topik tidak berkaitan."
+}"""
+
 
 class VerifiableStory(TypedDict):
+    id: int
     actor: str
     action: str
     benefit: str
@@ -165,27 +199,20 @@ def build_verification_prompt(
     benefit_text = story["benefit"].strip() if story["benefit"].strip() else "-"
     user = "\n".join(
         [
-            "CONTOH INPUT:",
-            'Kalimat Acuan: "[3] Kasir bisa langsung scan barcode barang pakai scanner genggam."',
-            "User Story Gemini:",
-            "- Actor: Kasir",
-            "- Action: scan barcode barang",
-            "- Benefit: -",
+            "=== CONTOH INPUT (VALID) ===",
+            VERIFICATION_EXAMPLE_VALID_INPUT,
             "",
-            "CONTOH OUTPUT:",
-            '{"is_valid": true, "confidence_score": 0.98, "reason": "Sesuai dengan sumber."}',
+            "=== CONTOH OUTPUT (VALID) ===",
+            VERIFICATION_EXAMPLE_VALID_OUTPUT,
             "",
-            "CONTOH NEGATIF INPUT:",
-            'Kalimat Acuan: "[2] Kita bahas soal jadwal rapat minggu depan."',
-            "User Story Gemini:",
-            "- Actor: Admin",
-            "- Action: menambahkan buku baru",
-            "- Benefit: -",
+            "=== CONTOH INPUT (TIDAK VALID) ===",
+            VERIFICATION_EXAMPLE_INVALID_INPUT,
             "",
-            "CONTOH NEGATIF OUTPUT:",
-            '{"is_valid": false, "confidence_score": 0.05, "reason": "Kalimat berisi topik tidak berkaitan."}',
+            "=== CONTOH OUTPUT (TIDAK VALID) ===",
+            VERIFICATION_EXAMPLE_INVALID_OUTPUT,
             "",
             "=== INPUT NYATA ===",
+            f"User Story ID: {story['id']}",
             f"Kalimat Acuan: \"[{sentence_index}] {sentence_text}\"",
             "User Story Gemini:",
             f"- Actor: {story['actor']}",

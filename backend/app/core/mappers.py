@@ -8,7 +8,7 @@ from app.core.schemas import (
 
 
 def to_document_dto(doc: Document) -> DocumentDto:
-    sentences = [SentenceDto(id=s.id, index=s.index, text=s.text)
+    sentences = [SentenceDto(id=s.id, index=s.index, text=s.text, isRelevant=s.is_relevant)
                  for s in sorted(doc.sentences, key=lambda x: x.index)]
     stories = [to_story_dto(s)
                for s in sorted(doc.user_stories, key=lambda x: x.story_code)]

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Request
+import logging
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -111,7 +112,7 @@ async def add_source(
             )
             similarity = cosine_similarity(vectors[0], vectors[1])
         except Exception as e:  # noqa: BLE001
-            print(f"[sources] embedding gagal, simpan tanpa similarity: {e}")
+            logging.getLogger("app.api.stories").warning(f"Embedding gagal, simpan tanpa similarity: {e}")
 
     link = StorySentence(
         story_id=story.id,
