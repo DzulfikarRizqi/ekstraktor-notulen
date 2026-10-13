@@ -279,3 +279,58 @@ def test_prefilter_logged(client, monkeypatch, caplog):
     logs = [r.message for r in caplog.records if "[prefilter]" in r.message]
     assert len(logs) >= 1
     assert "lolos" in logs[0]
+
+
+# ── stage error handling ──
+
+
+def test_stage_extract_error_500_and_failed_status(client, monkeypatch):
+    _patch_stage(monkeypatch)
+
+    async def boom(provider, sentences):
+        raise ValueError("LLM sedang sibuk")
+
+    monkeypatch.setattr("app.pipeline.pipeline.extract_stories", boom)
+
+    doc_id = _create_doc(client, content="Admin login. Kasir cetak.")
+    client.post(f"/api/documents/{doc_id}/stages/segment")
+    client.post(f"/api/documents/{doc_id}/stages/prefilter")
+
+    res = client.post(f"/api/documents/{doc_id}/stages/extract")
+    assert res.status_code == 500
+    err = res.json()["error"]
+    assert err["code"] == "STAGE_ERROR"
+    assert "LLM sedang sibuk" in err["message"]
+
+    detail = client.get(f"/api/documents/{doc_id}").json()["data"]
+    assert detail["status"] == "failed"
+    assert detail["error"] is not None
+    assert "LLM sedang sibuk" in detail["error"]
+
+
+def test_stage_verify_error_500_and_failed_status(client, monkeypatch):
+    _patch_stage(monkeypatch)
+
+    async def boom(
+        provider, *, sentence_index, sentence_text, story,
+        embedding_similarity=None, temperature=0,
+    ):
+        raise BrokenPipeError("LM Studio tidak merespons")
+
+    monkeypatch.setattr("app.pipeline.pipeline.verify_sentence", boom)
+
+    doc_id = _create_doc(client, content="Admin login.")
+    client.post(f"/api/documents/{doc_id}/stages/segment")
+    client.post(f"/api/documents/{doc_id}/stages/prefilter")
+    client.post(f"/api/documents/{doc_id}/stages/extract")
+
+    res = client.post(f"/api/documents/{doc_id}/stages/verify")
+    assert res.status_code == 500
+    err = res.json()["error"]
+    assert err["code"] == "STAGE_ERROR"
+    assert "LM Studio tidak merespons" in err["message"]
+
+    detail = client.get(f"/api/documents/{doc_id}").json()["data"]
+    assert detail["status"] == "failed"
+    assert detail["error"] is not None
+    assert "LM Studio tidak merespons" in detail["error"]

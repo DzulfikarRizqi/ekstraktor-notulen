@@ -182,6 +182,14 @@ def _stage_response(payload: dict) -> JSONResponse:
     return JSONResponse({"data": payload}, status_code=200)
 
 
+def _stage_error(doc: Document, db: Session, message: str) -> JSONResponse:
+    doc.status = "failed"
+    doc.error = message
+    db.add(doc)
+    db.commit()
+    return json_error("STAGE_ERROR", message, 500)
+
+
 @router.post("/{document_id}/stages/segment")
 def stage_segment(document_id: str, db: Session = Depends(get_session)):
     doc = _doc_404(document_id, db)
@@ -192,6 +200,8 @@ def stage_segment(document_id: str, db: Session = Depends(get_session)):
         return _stage_response(result)
     except RuntimeError as e:
         return conflict(str(e))
+    except Exception as e:
+        return _stage_error(doc, db, str(e))
 
 
 @router.post("/{document_id}/stages/prefilter")
@@ -204,6 +214,8 @@ def stage_prefilter(document_id: str, db: Session = Depends(get_session)):
         return _stage_response(result)
     except RuntimeError as e:
         return conflict(str(e))
+    except Exception as e:
+        return _stage_error(doc, db, str(e))
 
 
 @router.post("/{document_id}/stages/extract")
@@ -216,6 +228,8 @@ def stage_extract(document_id: str, db: Session = Depends(get_session)):
         return _stage_response(result)
     except RuntimeError as e:
         return conflict(str(e))
+    except Exception as e:
+        return _stage_error(doc, db, str(e))
 
 
 @router.post("/{document_id}/stages/verify")
@@ -228,6 +242,8 @@ def stage_verify(document_id: str, db: Session = Depends(get_session)):
         return _stage_response(result)
     except RuntimeError as e:
         return conflict(str(e))
+    except Exception as e:
+        return _stage_error(doc, db, str(e))
 
 
 # ── export ──

@@ -4,10 +4,11 @@ from pathlib import Path
 
 # Lingkungan uji: di-set SEBELUM modul app apa pun diimpor.
 os.environ["GEMINI_API_KEY"] = "test-key"
-os.environ["GEMINI_MODEL"] = "gemini-2.5-flash"
+os.environ["GEMINI_MODEL"] = "gemini-3.8-flash"
 os.environ["LM_STUDIO_BASE_URL"] = "http://localhost:1/v1"
 os.environ["LM_STUDIO_MODEL"] = "test-model"
 os.environ["USE_EMBEDDING_FALLBACK"] = "false"
+os.environ["EXTRACT_PROVIDER"] = "lmstudio"
 os.environ["CONF_THRESHOLD"] = "0.6"
 os.environ["EMBED_VERIFY_THRESHOLD"] = "0.5"
 

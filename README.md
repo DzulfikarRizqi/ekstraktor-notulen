@@ -12,8 +12,19 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Pastikan:
-- `backend/.env` → `GEMINI_API_KEY` terisi
 - [LM Studio](https://lmstudio.ai/) berjalan di `localhost:1234` dengan model `qwen2.5-3b-instruct`
+- `backend/.env` → `GEMINI_API_KEY` terisi (hanya jika memakai `EXTRACT_PROVIDER=gemini`)
+
+### Provider ekstraksi
+
+Tahap ekstraksi bisa memakai Qwen lokal (LM Studio) atau Gemini. Pilih lewat `backend/.env`:
+
+```bash
+EXTRACT_PROVIDER=lmstudio   # default — Qwen lokal, gratis, tanpa kuota
+EXTRACT_PROVIDER=gemini     # Gemini API (butuh GEMINI_API_KEY)
+```
+
+Prefilter dan verifikasi selalu memakai LM Studio.
 
 ### Cara paling cepat: endpoint gabungan (1 request)
 

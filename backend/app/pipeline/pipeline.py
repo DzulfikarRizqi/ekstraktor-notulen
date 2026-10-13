@@ -166,6 +166,13 @@ def run_prefilter(doc_id: str, db: Session) -> dict:
 # ── tahap tihap: ekstraksi ──
 
 
+def _extract_provider():
+    """Pilih provider ekstraksi dari konfigurasi EXTRACT_PROVIDER."""
+    if settings.extract_provider == "lmstudio":
+        return lm_studio_provider
+    return gemini_provider
+
+
 def run_extract(doc_id: str, db: Session) -> dict:
     doc = db.get(Document, doc_id)
     if doc is None:
@@ -192,7 +199,7 @@ def run_extract(doc_id: str, db: Session) -> dict:
     relevant_segments: list[IndexedSentence] = [
         {"index": s.index, "text": s.text} for s in sentences if s.is_relevant
     ]
-    stories = asyncio.run(extract_stories(gemini_provider, relevant_segments))
+    stories = asyncio.run(extract_stories(_extract_provider(), relevant_segments))
     _persist_stories(db, doc, stories, sentence_by_index)
 
     doc.status = "completed"

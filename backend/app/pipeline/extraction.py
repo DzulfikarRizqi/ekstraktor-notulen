@@ -26,10 +26,15 @@ class StoryResult(TypedDict):
 async def _call_extraction(
     provider: LlmProvider, system_prompt: str, user_prompt: str
 ) -> str:
+    schema = (
+        user_stories_gemini_json_schema
+        if provider.name == "gemini"
+        else user_stories_json_schema
+    )
     req = StructuredRequest(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        json_schema=user_stories_gemini_json_schema,
+        json_schema=schema,
         temperature=0.2,
     )
     return await generate_structured(provider, req, "Extraction")
