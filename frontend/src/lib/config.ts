@@ -4,6 +4,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).default("file:./dev.db"),
   GEMINI_API_KEY: z.string().min(1),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash"),
+  EXTRACT_PROVIDER: z.enum(["lmstudio", "gemini"]).default("lmstudio"),
   LM_STUDIO_BASE_URL: z.string().url().default("http://localhost:1234/v1"),
   LM_STUDIO_MODEL: z.string().default("qwen2.5-3b-instruct"),
   CONF_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),

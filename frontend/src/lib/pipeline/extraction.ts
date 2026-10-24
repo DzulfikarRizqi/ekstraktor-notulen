@@ -1,8 +1,12 @@
 import { geminiProvider } from "@/lib/llm/gemini";
+import { lmStudioProvider } from "@/lib/llm/openai-compat";
 import { generateStructured } from "@/lib/llm/provider";
+import { config } from "@/lib/config";
+import type { LlmProvider } from "@/lib/llm/provider";
 import {
   userStoriesSchema,
   userStoriesGeminiSchema,
+  userStoriesJsonSchema,
   type UserStoryOutput,
 } from "@/lib/llm/schema";
 import {
@@ -46,20 +50,31 @@ const capStories = (stories: UserStoryOutput[]): ExtractionResult => {
   return { stories: truncated ? stories.slice(0, 30) : stories, truncated };
 };
 
+const selectProvider = (): {
+  provider: LlmProvider;
+  schema: Record<string, unknown>;
+} => {
+  if (config.EXTRACT_PROVIDER === "lmstudio") {
+    return { provider: lmStudioProvider, schema: userStoriesJsonSchema };
+  }
+  return { provider: geminiProvider, schema: userStoriesGeminiSchema };
+};
+
 export async function extractUserStories(
   sentences: IndexedSentence[],
 ): Promise<ExtractionResult> {
+  const { provider, schema } = selectProvider();
   const { system, user } = buildExtractionPrompt(sentences);
 
   const attempt = async (userPrompt: string): Promise<UserStoryOutput[]> => {
     const raw = await generateStructured(
-      geminiProvider,
+      provider,
       {
         systemPrompt: system,
         userPrompt,
-        jsonSchema: userStoriesGeminiSchema,
+        jsonSchema: schema,
       },
-      "ekstraksi gemini",
+      `ekstraksi ${provider.name}`,
     );
     return parseStories(raw);
   };
