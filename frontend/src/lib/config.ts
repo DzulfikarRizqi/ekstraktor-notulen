@@ -7,6 +7,9 @@ const envSchema = z.object({
   EXTRACT_PROVIDER: z.enum(["lmstudio", "gemini"]).default("lmstudio"),
   LM_STUDIO_BASE_URL: z.string().url().default("http://localhost:1234/v1"),
   LM_STUDIO_MODEL: z.string().default("qwen2.5-3b-instruct"),
+  // Anggaran token estimasi per panggilan prefilter; sisa untuk system
+  // prompt, contoh few-shot, skema, dan headroom. Estimasi ~4 karakter/token.
+  PREFILTER_BATCH_TOKENS: z.coerce.number().int().min(1000).default(6000),
   CONF_THRESHOLD: z.coerce.number().min(0).max(1).default(0.6),
   EMBED_VERIFY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.5),
   USE_EMBEDDING_FALLBACK: z

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { geminiProvider } from "@/lib/llm/gemini";
+import { lmStudioProvider } from "@/lib/llm/openai-compat";
 import { extractUserStories } from "@/lib/pipeline/extraction";
 
 const goodStories = {
@@ -14,7 +14,7 @@ describe("extractUserStories", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("menghilangkan duplikat", async () => {
-    vi.spyOn(geminiProvider, "generateStructured").mockResolvedValue(
+    vi.spyOn(lmStudioProvider, "generateStructured").mockResolvedValue(
       JSON.stringify(goodStories),
     );
     const result = await extractUserStories([
@@ -31,7 +31,7 @@ describe("extractUserStories", () => {
       benefit: "",
       source_sentence_ids: [0],
     }));
-    vi.spyOn(geminiProvider, "generateStructured").mockResolvedValue(
+    vi.spyOn(lmStudioProvider, "generateStructured").mockResolvedValue(
       JSON.stringify({ user_stories: stories }),
     );
     await expect(extractUserStories([{ index: 0, text: "x" }])).rejects.toThrow();
@@ -39,7 +39,7 @@ describe("extractUserStories", () => {
 
   it("melakukan 1× repair retry bila output pertama invalid", async () => {
     const spy = vi
-      .spyOn(geminiProvider, "generateStructured")
+      .spyOn(lmStudioProvider, "generateStructured")
       .mockResolvedValueOnce('{"user_stories": "bukan array"}')
       .mockResolvedValueOnce(JSON.stringify(goodStories));
     const result = await extractUserStories([{ index: 0, text: "x" }]);
@@ -48,7 +48,7 @@ describe("extractUserStories", () => {
   });
 
   it("gagal bila repair retry tetap invalid", async () => {
-    vi.spyOn(geminiProvider, "generateStructured").mockResolvedValue(
+    vi.spyOn(lmStudioProvider, "generateStructured").mockResolvedValue(
       '{"user_stories": "bukan array"}',
     );
     await expect(extractUserStories([{ index: 0, text: "x" }])).rejects.toThrow();

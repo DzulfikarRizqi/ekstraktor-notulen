@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   EXTRACTION_EXAMPLE_OUTPUT,
+  EXTRACTION_EXAMPLE_OUTPUT_EN,
   PREFILTER_EXAMPLE_OUTPUT,
+  PREFILTER_EXAMPLE_OUTPUT_EN,
   VERIFICATION_EXAMPLE_INVALID_OUTPUT,
   VERIFICATION_EXAMPLE_VALID_OUTPUT,
   buildExtractionPrompt,
@@ -22,6 +24,16 @@ describe("prompt examples validate against schemas", () => {
 
   it("extraction example output validates", () => {
     const result = userStoriesSchema.safeParse(JSON.parse(EXTRACTION_EXAMPLE_OUTPUT));
+    expect(result.success).toBe(true);
+  });
+
+  it("prefilter english example output validates", () => {
+    const result = prefilterSchema.safeParse(JSON.parse(PREFILTER_EXAMPLE_OUTPUT_EN));
+    expect(result.success).toBe(true);
+  });
+
+  it("extraction english example output validates", () => {
+    const result = userStoriesSchema.safeParse(JSON.parse(EXTRACTION_EXAMPLE_OUTPUT_EN));
     expect(result.success).toBe(true);
   });
 
@@ -53,6 +65,20 @@ describe("prompt sections structure", () => {
     expect(prompts.user).toContain("=== CONTOH OUTPUT ===");
     expect(prompts.user).toContain("=== INPUT NYATA ===");
     expect(prompts.user).toContain("=== FORMAT JSON WAJIB ===");
+  });
+
+  it("prefilter prompt includes english example section", () => {
+    const sentences = [{ index: 0, text: "test" }];
+    const prompts = buildPrefilterPrompt(sentences);
+    expect(prompts.user).toContain("=== CONTOH INPUT (ENGLISH) ===");
+    expect(prompts.user).toContain("[PERSON1] Good morning everyone.");
+  });
+
+  it("extraction prompt includes english example section", () => {
+    const sentences = [{ index: 0, text: "test" }];
+    const prompts = buildExtractionPrompt(sentences);
+    expect(prompts.user).toContain("=== CONTOH INPUT (ENGLISH) ===");
+    expect(prompts.user).toContain("[PERSON2] Good afternoon everyone");
   });
 
   it("verification prompt has standardized sections and user story id", () => {

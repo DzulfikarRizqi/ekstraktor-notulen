@@ -12,6 +12,8 @@ const formatSentences = (sentences: IndexedSentence[]): string =>
 
 const PREFILTER_SYSTEM = `Anda adalah pemfilter teks rapat teknis.
 Tugas Anda adalah menyeleksi nomor indeks kalimat yang memuat kebutuhan fungsional, fitur aplikasi, masalah sistem, atau alur kerja bisnis.
+Transkrip dapat berbahasa Indonesia ATAU Inggris. Penanda pembicara seperti [PERSON5] atau (PERSON8) dapat muncul di awal kalimat; gunakan untuk mengenali siapa yang bicara, jangan dianggap bagian dari isi.
+Abaikan perbedaan bahasa: pilih kalimat relevan apa pun bahasanya, dan jangan menerjemahkan apa pun.
 
 ATURAN:
 1. Abaikan kalimat basa-basi, salam pembuka/penutup, jadwal rapat, dan obrolan non-teknis.
@@ -28,6 +30,15 @@ export const PREFILTER_EXAMPLE_OUTPUT = `{
   "relevant_sentence_ids": [1, 2]
 }`;
 
+const PREFILTER_EXAMPLE_INPUT_EN = `[0] [PERSON1] Good morning everyone.
+[1] [PERSON2] Today we need to add password reset via email.
+[2] Also, the dashboard should load in under two seconds.
+[3] [PERSON1] Alright, see you next week.`;
+
+export const PREFILTER_EXAMPLE_OUTPUT_EN = `{
+  "relevant_sentence_ids": [1, 2]
+}`;
+
 export function buildPrefilterPrompt(sentences: IndexedSentence[]): {
   system: string;
   user: string;
@@ -38,6 +49,12 @@ export function buildPrefilterPrompt(sentences: IndexedSentence[]): {
     ``,
     `=== CONTOH OUTPUT ===`,
     PREFILTER_EXAMPLE_OUTPUT,
+    ``,
+    `=== CONTOH INPUT (ENGLISH) ===`,
+    PREFILTER_EXAMPLE_INPUT_EN,
+    ``,
+    `=== CONTOH OUTPUT (ENGLISH) ===`,
+    PREFILTER_EXAMPLE_OUTPUT_EN,
     ``,
     `=== INPUT NYATA ===`,
     formatSentences(sentences),
@@ -52,6 +69,7 @@ export function buildPrefilterPrompt(sentences: IndexedSentence[]): {
 
 const EXTRACTION_SYSTEM = `Anda adalah seorang Senior System Analyst yang ahli dalam Requirements Engineering.
 Tugas Anda adalah membaca transkrip rapat (yang setiap kalimatnya sudah diberi nomor indeks) dan mengekstrak kebutuhan fungsional menjadi format User Story.
+Transkrip dapat berbahasa Indonesia ATAU Inggris. Ekstrak "actor", "action", dan "benefit" dalam bahasa yang sama dengan kalimat sumbernya — JANGAN menerjemahkan. Penanda pembicara seperti [PERSON5] atau (PERSON8) menandakan siapa yang bicara; gunakan itu sebagai petunjuk "actor" ketika sesuai, dan jangan salin penanda itu ke dalam teks field.
 
 ATURAN KETAT:
 1. Anda HANYA boleh merespons dengan format JSON yang valid.
@@ -92,6 +110,29 @@ export const EXTRACTION_EXAMPLE_OUTPUT = `{
   ]
 }`;
 
+const EXTRACTION_EXAMPLE_INPUT_EN = `[0] [PERSON2] Good afternoon everyone, thanks for joining the inventory system kickoff.
+[1] From the warehouse side, I want staff to record stock movements directly from a handheld scanner.
+[2] That way we stop losing track of items between shelves.
+[3] Right, and the system should send an alert when stock falls below the reorder level.
+[4] So we never run out of bestsellers.`;
+
+export const EXTRACTION_EXAMPLE_OUTPUT_EN = `{
+  "user_stories": [
+    {
+      "actor": "Warehouse staff",
+      "action": "record stock movements directly from a handheld scanner",
+      "benefit": "stop losing track of items between shelves",
+      "source_sentence_ids": [1, 2]
+    },
+    {
+      "actor": "System",
+      "action": "send an alert when stock falls below the reorder level",
+      "benefit": "we never run out of bestsellers",
+      "source_sentence_ids": [3, 4]
+    }
+  ]
+}`;
+
 export function buildExtractionPrompt(
   sentences: IndexedSentence[],
 ): { system: string; user: string } {
@@ -101,6 +142,12 @@ export function buildExtractionPrompt(
     ``,
     `=== CONTOH OUTPUT ===`,
     EXTRACTION_EXAMPLE_OUTPUT,
+    ``,
+    `=== CONTOH INPUT (ENGLISH) ===`,
+    EXTRACTION_EXAMPLE_INPUT_EN,
+    ``,
+    `=== CONTOH OUTPUT (ENGLISH) ===`,
+    EXTRACTION_EXAMPLE_OUTPUT_EN,
     ``,
     `=== INPUT NYATA ===`,
     formatSentences(sentences),
@@ -124,6 +171,8 @@ export function buildExtractionRepairPrompt(error: string): string {
 
 const VERIFICATION_SYSTEM = `Anda adalah verifikator data kebutuhan sistem.
 Tugas Anda adalah memverifikasi apakah klaim User Story BENAR-BENAR bersumber dari Kalimat Acuan yang diberikan.
+Kalimat Acuan dapat berbahasa Indonesia ATAU Inggris; User Story dapat ditulis dalam bahasa yang sama dengan Kalimat Acuan. Verifikasi berdasarkan makna, bukan bahasa: User Story berbahasa Inggris hanya valid jika benar-benar didukung Kalimat Acuan berbahasa Inggris.
+Penanda pembicara seperti [PERSON5] atau (PERSON8) menandakan siapa yang bicara; itu kandidat "actor" yang sah.
 
 ATURAN:
 1. Evaluasi apakah Actor, Action, dan Benefit jujur mencerminkan isi Kalimat Acuan.

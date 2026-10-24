@@ -44,4 +44,44 @@ describe("prefilterSentences", () => {
     const result = await prefilterSentences(sentences);
     expect(result).toEqual([1]);
   });
+
+  it("memecah dokumen besar menjadi beberapa panggilan LLM", async () => {
+    // Budget 6000 token × 4 char/token = 24.000 karakter per batch.
+    // 26 kalimat × 910 char ≈ 23.660 → muat; kalimat ke-27 memicu batch baru.
+    const long = Array.from({ length: 60 }, (_, i) => ({
+      index: i,
+      text: "K".repeat(900),
+    }));
+    const spy = vi
+      .spyOn(lmStudioProvider, "generateStructured")
+      .mockResolvedValue('{"relevant_sentence_ids": [0]}');
+    const result = await prefilterSentences(long);
+    expect(spy).toHaveBeenCalledTimes(3);
+    // Setiap batch memvalidasi index di rentangnya sendiri; index 0 hanya
+    // valid di batch pertama, dua batch berikutnya fallback penuh.
+    expect(result).toEqual([
+      0,
+      ...Array.from({ length: 34 }, (_, i) => 26 + i),
+    ]);
+  });
+
+  it("fallback per-batch: batch invalid tidak membatalkan batch lain", async () => {
+    const long = Array.from({ length: 60 }, (_, i) => ({
+      index: i,
+      text: "K".repeat(900),
+    }));
+    const spy = vi
+      .spyOn(lmStudioProvider, "generateStructured")
+      .mockResolvedValueOnce("maaf, tidak ada")
+      .mockResolvedValueOnce('{"relevant_sentence_ids": [30]}')
+      .mockResolvedValueOnce('{"relevant_sentence_ids": [55]}');
+    const result = await prefilterSentences(long);
+    expect(spy).toHaveBeenCalledTimes(3);
+    // Batch 1 (0-25) invalid → fallback semua; batch 2 (26-51) → hanya 30; batch 3 (52-59) → hanya 55.
+    expect(result).toEqual([
+      ...Array.from({ length: 26 }, (_, i) => i),
+      30,
+      55,
+    ]);
+  });
 });

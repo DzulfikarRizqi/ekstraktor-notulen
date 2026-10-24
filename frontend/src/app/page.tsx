@@ -98,6 +98,24 @@ export default function Home() {
     setSidebarOpen(false);
   }
 
+  async function loadTxtFile(file: File) {
+    setError("");
+    if (file.size > 1_000_000) {
+      setError("Ukuran file melebihi 1 MB. Gunakan file teks yang lebih kecil.");
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (text.length > 50_000) {
+        setError(`File terlalu panjang: ${text.length.toLocaleString("id-ID")} karakter (maksimum 50.000).`);
+      }
+      setContent(text);
+      if (!title.trim()) setTitle(file.name.replace(/\.txt$/i, ""));
+    } catch {
+      setError("Gagal membaca file. Pastikan file adalah teks (.txt) yang valid.");
+    }
+  }
+
   function openDocument(id: string) {
     setDetail(null);
     setSelectedId(id);
@@ -179,7 +197,7 @@ export default function Home() {
             <div className="composer-head"><span className="composer-icon"><Icon name="file" size={18} /></span><label htmlFor="title">NOTULEN BARU</label><span className="composer-head-hint">01 / INPUT</span></div>
             <input id="title" className="title-input" type="text" maxLength={200} placeholder="Judul rapat (opsional)" value={title} onChange={(e) => setTitle(e.target.value)} />
             <textarea id="content" aria-label="Isi notulen rapat" className="content-input" placeholder="Tempel isi notulen rapat di sini...\n\nContoh: Tim sepakat pengguna dapat mendaftar akun menggunakan email. Admin perlu melihat daftar pendaftaran baru setiap hari." value={content} onChange={(e) => setContent(e.target.value)} />
-            <div className="composer-bottom"><span className={`char-count ${content.length > 50_000 ? "over-limit" : ""}`}>{content.length.toLocaleString("id-ID")} / 50.000 karakter</span><button className="submit-button" type="submit" disabled={!content.trim() || content.length > 50_000 || submitting}>{submitting ? "Menyimpan..." : "Ekstrak user story"}<span className="submit-icon"><Icon name="arrow" size={17} /></span></button></div>
+            <div className="composer-bottom"><span className={`char-count ${content.length > 50_000 ? "over-limit" : ""}`}>{content.length.toLocaleString("id-ID")} / 50.000 karakter</span><div className="composer-actions"><label className="load-button"><Icon name="file" size={15} /> Muat file .txt<input type="file" accept=".txt,text/plain" className="file-input" onChange={(e) => { const file = e.target.files?.[0]; if (file) void loadTxtFile(file); e.target.value = ""; }} /></label><button className="submit-button" type="submit" disabled={!content.trim() || content.length > 50_000 || submitting}>{submitting ? "Menyimpan..." : "Ekstrak user story"}<span className="submit-icon"><Icon name="arrow" size={17} /></span></button></div></div>
           </form>
           {error && <p className="error-banner" role="alert">{error}</p>}
           <div className="feature-row"><div><span className="feature-number">01</span><strong>Tempel notulen</strong><small>Catatan rapat dalam bentuk teks</small></div><div><span className="feature-number">02</span><strong>Ekstraksi otomatis</strong><small>Kebutuhan diturunkan menjadi story</small></div><div><span className="feature-number">03</span><strong>Telusuri sumber</strong><small>Setiap story punya jejak asal</small></div></div>
