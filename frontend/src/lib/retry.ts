@@ -26,8 +26,9 @@ export async function withRetry<T>(
       if (attempt >= maxAttempts || !retryable) {
         throw e;
       }
-      const delay = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
-      await sleep(delay);
+      const backoff = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+      const retryAfterMs = isLlmError(e) ? e.retryAfterMs ?? 0 : 0;
+      await sleep(Math.max(backoff, retryAfterMs));
     }
   }
 }

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import type { ApiError, ApiOk, DocumentDto, DocumentListItem } from "@/types";
+import type { ApiError, ApiOk, DocumentDto, DocumentListItem, PipelineProvider, UserStoryDto } from "@/types";
 
-type IconName = "menu" | "close" | "plus" | "arrow" | "file" | "spark" | "chevron" | "download" | "refresh";
+const PROVIDER_STORAGE_KEY = "notula.provider";
+
+type IconName = "menu" | "close" | "plus" | "arrow" | "file" | "spark" | "chevron" | "download" | "refresh" | "trash";
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -16,6 +18,7 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     chevron: <path d="m9 18 6-6-6-6" />,
     download: <><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v4h16v-4" /></>,
     refresh: <><path d="M20 11a8 8 0 1 0-2 6M20 4v7h-7" /></>,
+    trash: <><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13M10 11v6M14 11v6" /></>,
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -45,6 +48,15 @@ function dateGroup(date: string) {
   return "Lebih lama";
 }
 
+function storyReview(story: UserStoryDto, status: DocumentDto["status"]) {
+  if (status === "processing") return { label: "Memverifikasi…", className: "review-pending" };
+  if (status === "failed" && story.citations.length === 0) return { label: "Belum diverifikasi", className: "review-pending" };
+  if (story.citations.some((citation) => citation.verificationStatus === "needs_review")) {
+    return { label: "Perlu ditinjau", className: "review-needed" };
+  }
+  return { label: "Terverifikasi", className: "" };
+}
+
 export default function Home() {
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -57,6 +69,9 @@ export default function Home() {
   const [listError, setListError] = useState("");
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [revealedCount, setRevealedCount] = useState(0);
+  const [provider, setProvider] = useState<PipelineProvider>("lmstudio");
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +92,7 @@ export default function Home() {
         setDetail(doc);
         setLoading(false);
         if (doc.status === "processing" || doc.status === "pending") {
-          timer = setTimeout(load, 2500);
+          timer = setTimeout(load, 1000);
         } else {
           setDocuments((items) => items.map((item) => item.id === doc.id ? { ...item, status: doc.status, storyCount: doc.userStories.length } : item));
         }
@@ -89,12 +104,43 @@ export default function Home() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [selectedId, revision]);
 
+  useEffect(() => {
+    if (!detail || detail.status !== "processing") return;
+    const total = detail.userStories.length;
+    if (revealedCount >= total) return;
+    const timer = setTimeout(() => {
+      setRevealedCount((count) => Math.min(count + 1, total));
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [detail, revealedCount]);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(PROVIDER_STORAGE_KEY);
+    if (stored === "lmstudio" || stored === "gemini") {
+      queueMicrotask(() => setProvider(stored));
+    }
+  }, []);
+
+  function chooseProvider(next: PipelineProvider) {
+    setProvider(next);
+    window.localStorage.setItem(PROVIDER_STORAGE_KEY, next);
+  }
+
+  function extractInit(): RequestInit {
+    return {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    };
+  }
+
   function newDocument() {
     setSelectedId(null);
     setDetail(null);
     setTitle("");
     setContent("");
     setError("");
+    setRevealedCount(0);
     setSidebarOpen(false);
   }
 
@@ -121,7 +167,32 @@ export default function Home() {
     setSelectedId(id);
     setLoading(true);
     setError("");
+    setRevealedCount(0);
     setSidebarOpen(false);
+  }
+
+  async function deleteDocument(doc: DocumentListItem) {
+    if (deletingId) return;
+    const confirmed = window.confirm(
+      `Hapus notulen "${doc.title}"? Tindakan ini tidak bisa dibatalkan.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(doc.id);
+    setListError("");
+    try {
+      await requestData<{ ok: boolean }>(`/api/documents/${doc.id}`, {
+        method: "DELETE",
+      });
+      setDocuments((items) => items.filter((item) => item.id !== doc.id));
+      if (selectedId === doc.id) {
+        newDocument();
+      }
+    } catch (e) {
+      setListError((e as Error).message);
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -137,10 +208,11 @@ export default function Home() {
       });
       setTitle("");
       setContent("");
+      setRevealedCount(0);
       setRevision((value) => value + 1);
       openDocument(created.id);
       try {
-        await requestData<{ status: string }>(`/api/documents/${created.id}/extract`, { method: "POST" });
+        await requestData<{ status: string }>(`/api/documents/${created.id}/extract`, extractInit());
       } catch (e) {
         setError(`Notulen tersimpan, tetapi ekstraksi belum dimulai: ${(e as Error).message}`);
       }
@@ -153,6 +225,11 @@ export default function Home() {
 
   const groups = ["Hari ini", "Kemarin", "7 hari terakhir", "Lebih lama"];
   const activeTitle = detail?.title ?? documents.find((doc) => doc.id === selectedId)?.title;
+  const visibleStories = detail
+    ? detail.status === "processing"
+      ? detail.userStories.slice(0, revealedCount)
+      : detail.userStories
+    : [];
 
   return (
     <div className="app-shell">
@@ -175,10 +252,24 @@ export default function Home() {
             if (!items.length) return null;
             return <div className="history-group" key={group}>
               <div className="group-label">{group}</div>
-              {items.map((doc) => <button key={doc.id} className={`history-item ${selectedId === doc.id ? "active" : ""}`} onClick={() => openDocument(doc.id)} aria-current={selectedId === doc.id ? "page" : undefined}>
-                <Icon name="file" size={17} />
-                <span className="history-item-text"><span className="history-title">{doc.title}</span><span className="history-meta">{statusLabel[doc.status]}{doc.status === "completed" ? ` · ${doc.storyCount} story` : ""}</span></span>
-              </button>)}
+              {items.map((doc) => {
+                const isDeleting = deletingId === doc.id;
+                return <div key={doc.id} className={`history-row ${selectedId === doc.id ? "active" : ""}`}>
+                  <button className="history-item" onClick={() => openDocument(doc.id)} aria-current={selectedId === doc.id ? "page" : undefined}>
+                    <Icon name="file" size={17} />
+                    <span className="history-item-text"><span className="history-title">{doc.title}</span><span className="history-meta">{statusLabel[doc.status]}{doc.status === "completed" ? ` · ${doc.storyCount} story` : ""}</span></span>
+                  </button>
+                  <button
+                    className="history-delete"
+                    onClick={() => void deleteDocument(doc)}
+                    disabled={isDeleting || doc.status === "processing"}
+                    aria-label={`Hapus notulen ${doc.title}`}
+                    title={doc.status === "processing" ? "Tunggu ekstraksi selesai sebelum menghapus" : "Hapus notulen"}
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                </div>;
+              })}
             </div>;
           })}
         </nav>
@@ -195,6 +286,14 @@ export default function Home() {
           <div className="welcome"><div className="eyebrow"><span className="eyebrow-line" /> NOTULEN JADI KEBUTUHAN NYATA</div><h1>Setiap diskusi punya<br /><em>cerita untuk dibangun.</em></h1><p>Tempel notulen rapat Anda. Notula akan menemukan user story dan menautkannya kembali ke kalimat sumbernya.</p></div>
           <form className="composer" onSubmit={submit}>
             <div className="composer-head"><span className="composer-icon"><Icon name="file" size={18} /></span><label htmlFor="title">NOTULEN BARU</label><span className="composer-head-hint">01 / INPUT</span></div>
+            <div className="provider-select">
+              <span className="provider-label">PROVIDER</span>
+              <div className="provider-options" role="group" aria-label="Pilih provider ekstraksi">
+                <button type="button" className={`provider-option ${provider === "lmstudio" ? "active" : ""}`} onClick={() => chooseProvider("lmstudio")} disabled={submitting} aria-pressed={provider === "lmstudio"}>LM Studio <small>lokal</small></button>
+                <button type="button" className={`provider-option ${provider === "gemini" ? "active" : ""}`} onClick={() => chooseProvider("gemini")} disabled={submitting} aria-pressed={provider === "gemini"}>Gemini <small>ekstraksi</small></button>
+              </div>
+              <span className="provider-hint">{provider === "gemini" ? "Prefilter & verifikasi tetap lokal" : "Semua tahap lokal"}</span>
+            </div>
             <input id="title" className="title-input" type="text" maxLength={200} placeholder="Judul rapat (opsional)" value={title} onChange={(e) => setTitle(e.target.value)} />
             <textarea id="content" aria-label="Isi notulen rapat" className="content-input" placeholder="Tempel isi notulen rapat di sini...\n\nContoh: Tim sepakat pengguna dapat mendaftar akun menggunakan email. Admin perlu melihat daftar pendaftaran baru setiap hari." value={content} onChange={(e) => setContent(e.target.value)} />
             <div className="composer-bottom"><span className={`char-count ${content.length > 50_000 ? "over-limit" : ""}`}>{content.length.toLocaleString("id-ID")} / 50.000 karakter</span><div className="composer-actions"><label className="load-button"><Icon name="file" size={15} /> Muat file .txt<input type="file" accept=".txt,text/plain" className="file-input" onChange={(e) => { const file = e.target.files?.[0]; if (file) void loadTxtFile(file); e.target.value = ""; }} /></label><button className="submit-button" type="submit" disabled={!content.trim() || content.length > 50_000 || submitting}>{submitting ? "Menyimpan..." : "Ekstrak user story"}<span className="submit-icon"><Icon name="arrow" size={17} /></span></button></div></div>
@@ -207,12 +306,16 @@ export default function Home() {
           {loading && !detail && <div className="state-card"><span className="loading-ring" /> Memuat dokumen...</div>}
           {detail && <>
             <div className="result-summary"><span className={`status-pill status-${detail.status}`}><span className="status-dot" />{statusLabel[detail.status]}</span><span className="summary-divider" /><span><strong>{detail.userStories.length}</strong> user story ditemukan</span><span className="summary-divider" /><span><strong>{detail.sentences.length}</strong> kalimat sumber</span></div>
-            {(detail.status === "processing" || detail.status === "pending") && <div className="state-card processing-card"><span className="loading-ring" /><div><strong>{detail.status === "pending" ? "Menunggu ekstraksi dimulai" : "Sedang mengekstrak user story"}</strong><p>Notula sedang membaca notulen Anda. Halaman ini akan diperbarui otomatis.</p></div>{detail.status === "pending" && <button className="outline-button" onClick={async () => { try { setError(""); await requestData(`/api/documents/${detail.id}/extract`, { method: "POST" }); setRevision((v) => v + 1); } catch (e) { setError((e as Error).message); } }}>Mulai ekstraksi</button>}</div>}
-            {detail.status === "failed" && <div className="state-card failed-card"><div><strong>Ekstraksi gagal</strong><p>{detail.error || "Terjadi kesalahan saat memproses notulen."}</p></div><button className="outline-button" onClick={async () => { try { setError(""); await requestData(`/api/documents/${detail.id}/extract`, { method: "POST" }); setRevision((v) => v + 1); } catch (e) { setError((e as Error).message); } }}><Icon name="refresh" size={16} /> Coba lagi</button></div>}
-            {detail.status === "completed" && <>
+            {(detail.status === "processing" || detail.status === "pending") && detail.userStories.length === 0 && <div className="state-card processing-card"><span className="loading-ring" /><div><strong>{detail.status === "pending" ? "Menunggu ekstraksi dimulai" : "Sedang mengekstrak user story"}</strong><p>Notula sedang membaca notulen Anda. Halaman ini akan diperbarui otomatis.</p></div>{detail.status === "pending" && <button className="outline-button" onClick={async () => { try { setError(""); setRevealedCount(0); await requestData(`/api/documents/${detail.id}/extract`, extractInit()); setRevision((v) => v + 1); } catch (e) { setError((e as Error).message); } }}>Mulai ekstraksi</button>}</div>}
+            {detail.status === "processing" && detail.userStories.length > 0 && <div className="processing-inline"><span className="loading-ring" /><span>Story ditemukan. Verifikasi sumber sedang berjalan…</span></div>}
+            {detail.status === "failed" && <div className="state-card failed-card"><div><strong>Ekstraksi gagal</strong><p>{detail.error || "Terjadi kesalahan saat memproses notulen."}</p></div><button className="outline-button" onClick={async () => { try { setError(""); setRevealedCount(0); await requestData(`/api/documents/${detail.id}/extract`, extractInit()); setRevision((v) => v + 1); } catch (e) { setError((e as Error).message); } }}><Icon name="refresh" size={16} /> Coba lagi</button></div>}
+            {(detail.status === "completed" || detail.userStories.length > 0) && <>
               {detail.truncated && <p className="notice-banner">Hasil dibatasi hingga 30 user story. Sebagian kebutuhan mungkin belum tercakup.</p>}
-              <div className="section-heading"><div><span className="section-index">01 / HASIL</span><h2>User story</h2></div><a className="outline-button" href={`/api/documents/${detail.id}/export?format=md&filter=all`}><Icon name="download" size={16} /> Ekspor .md</a></div>
-              {detail.userStories.length === 0 ? <div className="state-card">Tidak ada user story yang ditemukan dari notulen ini.</div> : <div className="stories">{detail.userStories.map((story, index) => <article className="story-card" key={story.id}><div className="story-top"><span className="story-index">{String(index + 1).padStart(2, "0")}</span><span className="story-code">{story.storyCode}</span><span className={`review-pill ${story.citations.some((c) => c.verificationStatus === "needs_review") ? "review-needed" : ""}`}>{story.citations.some((c) => c.verificationStatus === "needs_review") ? "Perlu ditinjau" : "Terverifikasi"}</span></div><p className="story-text">Sebagai <strong>{story.actor}</strong>, saya ingin <strong>{story.action}</strong>{story.benefit ? <> agar <strong>{story.benefit}</strong></> : null}.</p><div className="citation-area"><span className="citation-label">KALIMAT SUMBER</span>{story.citations.length ? story.citations.map((citation) => { const sentence = detail.sentences.find((s) => s.id === citation.sentenceId); return <div className="citation" key={citation.id}><span className="citation-number">{sentence ? String(sentence.index + 1).padStart(2, "0") : "--"}</span><span>{sentence?.text ?? "Kalimat sumber tidak ditemukan"}</span><span className={`citation-status ${citation.verificationStatus === "needs_review" ? "needs-review" : ""}`}>{citation.verificationStatus === "valid" ? "Valid" : "Tinjau"}{citation.confidenceScore !== null ? ` · ${Math.round(citation.confidenceScore * 100)}%` : ""}</span></div>; }) : <p className="no-citation">Belum ada kalimat sumber yang tertaut.</p>}</div></article>)}</div>}
+              <div className="section-heading"><div><span className="section-index">01 / HASIL</span><h2>User story</h2></div>{detail.status === "completed" && <a className="outline-button" href={`/api/documents/${detail.id}/export?format=md&filter=all`}><Icon name="download" size={16} /> Ekspor .md</a>}</div>
+              {detail.userStories.length === 0 ? <div className="state-card">Tidak ada user story yang ditemukan dari notulen ini.</div> : <div className="stories">{visibleStories.map((story, index) => {
+                const review = storyReview(story, detail.status);
+                return <article className="story-card" key={story.id}><div className="story-top"><span className="story-index">{String(index + 1).padStart(2, "0")}</span><span className="story-code">{story.storyCode}</span><span className={`review-pill ${review.className}`}>{review.label}</span></div><p className="story-text">Sebagai <strong>{story.actor}</strong>, saya ingin <strong>{story.action}</strong>{story.benefit ? <> agar <strong>{story.benefit}</strong></> : null}.</p><div className="citation-area"><span className="citation-label">KALIMAT SUMBER</span>{story.citations.length ? story.citations.map((citation) => { const sentence = detail.sentences.find((s) => s.id === citation.sentenceId); return <div className="citation" key={citation.id}><span className="citation-number">{sentence ? String(sentence.index + 1).padStart(2, "0") : "--"}</span><span>{sentence?.text ?? "Kalimat sumber tidak ditemukan"}</span><span className={`citation-status ${citation.verificationStatus === "needs_review" ? "needs-review" : ""}`}>{citation.verificationStatus === "valid" ? "Valid" : "Tinjau"}{citation.confidenceScore !== null ? ` · ${Math.round(citation.confidenceScore * 100)}%` : ""}</span></div>; }) : <p className="no-citation">{detail.status === "processing" ? "Menunggu verifikasi sumber…" : "Belum ada kalimat sumber yang tertaut."}</p>}</div></article>;
+              })}</div>}
             </>}
             {detail.sentences.length > 0 && <section className="source-section"><div className="section-heading"><div><span className="section-index">02 / REFERENSI</span><h2>Kalimat notulen</h2></div></div><div className="source-list">{detail.sentences.map((sentence) => <div className="source-row" key={sentence.id}><span>{String(sentence.index + 1).padStart(2, "0")}</span><p>{sentence.text}</p></div>)}</div></section>}
           </>}

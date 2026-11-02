@@ -1,12 +1,17 @@
 export class LlmError extends Error {
   readonly status: number | null;
   readonly retryable: boolean;
+  readonly retryAfterMs: number | null;
 
-  constructor(message: string, opts: { status?: number; retryable?: boolean } = {}) {
+  constructor(
+    message: string,
+    opts: { status?: number; retryable?: boolean; retryAfterMs?: number } = {},
+  ) {
     super(message);
     this.name = "LlmError";
     this.status = opts.status ?? null;
     this.retryable = opts.retryable ?? false;
+    this.retryAfterMs = opts.retryAfterMs ?? null;
   }
 }
 

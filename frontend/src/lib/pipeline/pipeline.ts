@@ -1,12 +1,17 @@
 import { db } from "@/lib/db";
+import { config } from "@/lib/config";
 import type { UserStory } from "@/generated/prisma/client";
 import type { IndexedSentence } from "@/lib/llm/prompt";
+import type { PipelineProvider } from "@/types";
 import { segmentText } from "./segmenter";
 import { prefilterSentences } from "./prefilter";
 import { extractUserStories } from "./extraction";
 import { verifyStories } from "./verification";
 
-export async function runPipeline(documentId: string): Promise<void> {
+export async function runPipeline(
+  documentId: string,
+  provider: PipelineProvider = config.EXTRACT_PROVIDER,
+): Promise<void> {
   const document = await db.document.findUniqueOrThrow({
     where: { id: documentId },
   });
@@ -32,12 +37,14 @@ export async function runPipeline(documentId: string): Promise<void> {
   });
   const byIndex = new Map(sentences.map((s) => [s.index, s]));
 
-  const relevantIndices = await prefilterSentences(indexed);
+  // Hybrid: Gemini hanya untuk ekstraksi; prefilter & verifikasi tetap lokal
+  // agar konsumsi kuota Gemini tetap satu panggilan per dokumen.
+  const relevantIndices = await prefilterSentences(indexed, "lmstudio");
   const filtered: IndexedSentence[] = indexed.filter((s) =>
     relevantIndices.includes(s.index),
   );
 
-  const { stories, truncated } = await extractUserStories(filtered);
+  const { stories, truncated } = await extractUserStories(filtered, provider);
 
   const createdStories: UserStory[] = [];
   for (let i = 0; i < stories.length; i++) {
@@ -65,6 +72,7 @@ export async function runPipeline(documentId: string): Promise<void> {
       sourceIndices: st.source_sentence_ids,
     })),
     indexed,
+    "lmstudio",
   );
 
   for (let i = 0; i < createdStories.length; i++) {

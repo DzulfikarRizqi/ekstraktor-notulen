@@ -32,6 +32,9 @@ export type DocumentStatus =
   | "completed"
   | "failed";
 
+export type PipelineProvider = "lmstudio" | "gemini";
+export type ExtractProvider = PipelineProvider;
+
 export interface DocumentDto {
   id: string;
   title: string;

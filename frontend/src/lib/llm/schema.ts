@@ -42,3 +42,5 @@ export const prefilterJsonSchema = nativeJson(prefilterSchema);
 export const verificationJsonSchema = nativeJson(verificationSchema);
 
 export const userStoriesGeminiSchema = userStoriesSchema.toJSONSchema();
+export const prefilterGeminiSchema = prefilterSchema.toJSONSchema();
+export const verificationGeminiSchema = verificationSchema.toJSONSchema();

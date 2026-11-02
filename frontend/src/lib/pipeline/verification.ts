@@ -1,18 +1,21 @@
 import { config } from "@/lib/config";
 import { embedTexts } from "@/lib/embedding/embedder";
 import { cosineSimilarity } from "@/lib/embedding/similarity";
+import { geminiProvider } from "@/lib/llm/gemini";
 import { lmStudioProvider } from "@/lib/llm/openai-compat";
 import { generateStructured } from "@/lib/llm/provider";
 import {
   verificationSchema,
   verificationJsonSchema,
+  verificationGeminiSchema,
 } from "@/lib/llm/schema";
 import {
   buildVerificationPrompt,
   type IndexedSentence,
 } from "@/lib/llm/prompt";
 import { parseJson } from "@/lib/llm/parse";
-import type { VerificationStatus } from "@/types";
+import { withRetry } from "@/lib/retry";
+import type { PipelineProvider, VerificationStatus } from "@/types";
 
 export interface StoryToVerify {
   id: number;
@@ -50,6 +53,7 @@ export function decideStatus(
 export async function verifyStories(
   stories: StoryToVerify[],
   sentences: IndexedSentence[],
+  mode: PipelineProvider = config.EXTRACT_PROVIDER,
 ): Promise<CitationVerdict[][]> {
   const useEmbedding = config.USE_EMBEDDING_FALLBACK;
 
@@ -66,12 +70,23 @@ export async function verifyStories(
     sentences.forEach((s, i) => vecByIndex.set(s.index, sentenceVecs![i]));
   }
 
-  const results: CitationVerdict[][] = [];
+  const llm = mode === "gemini" ? geminiProvider : lmStudioProvider;
+  const jsonSchema =
+    mode === "gemini" ? verificationGeminiSchema : verificationJsonSchema;
+  // Satu panggilan per citation. Gemini lebih toleran konkurensi; LM Studio
+  // lokal diproses berurutan agar tidak membebani model/VRAM.
+  const concurrency = mode === "gemini" ? 4 : 1;
+
+  const results: CitationVerdict[][] = stories.map(
+    (story) => new Array<CitationVerdict>(story.sourceIndices.length),
+  );
+  const tasks: Array<() => Promise<void>> = [];
+
   for (let s = 0; s < stories.length; s++) {
     const story = stories[s];
-    const citations: CitationVerdict[] = [];
 
-    for (const sourceIndex of story.sourceIndices) {
+    for (let c = 0; c < story.sourceIndices.length; c++) {
+      const sourceIndex = story.sourceIndices[c];
       const sentence = textOf(sentences, sourceIndex);
       const similarity =
         storyVecs && sentenceVecs
@@ -79,14 +94,14 @@ export async function verifyStories(
           : null;
 
       if (!sentence) {
-        citations.push({
+        results[s][c] = {
           sourceIndex,
           llmVerdict: false,
           confidenceScore: null,
           llmReason: "Index sumber di luar rentang kalimat (butuh review).",
           embeddingSimilarity: similarity,
           verificationStatus: "needs_review",
-        });
+        };
         continue;
       }
 
@@ -96,28 +111,43 @@ export async function verifyStories(
         story: { id: story.id, actor: story.actor, action: story.action, benefit: story.benefit },
       });
 
-      const raw = await generateStructured(
-        lmStudioProvider,
-        {
-          systemPrompt: system,
-          userPrompt: user,
-          jsonSchema: verificationJsonSchema,
-        },
-        "verifikasi local",
-      );
-      const result = verificationSchema.parse(parseJson(raw));
+      tasks.push(async () => {
+        const raw = await withRetry(() =>
+          generateStructured(
+            llm,
+            {
+              systemPrompt: system,
+              userPrompt: user,
+              jsonSchema,
+            },
+            `verifikasi ${llm.name}`,
+          ),
+        );
+        const result = verificationSchema.parse(parseJson(raw));
 
-      citations.push({
-        sourceIndex,
-        llmVerdict: result.is_valid,
-        confidenceScore: result.confidence_score,
-        llmReason: result.reason,
-        embeddingSimilarity: similarity,
-        verificationStatus: decideStatus(result, similarity),
+        results[s][c] = {
+          sourceIndex,
+          llmVerdict: result.is_valid,
+          confidenceScore: result.confidence_score,
+          llmReason: result.reason,
+          embeddingSimilarity: similarity,
+          verificationStatus: decideStatus(result, similarity),
+        };
       });
     }
-    results.push(citations);
   }
+
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= tasks.length) return;
+      await tasks[index]();
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()),
+  );
 
   return results;
 }

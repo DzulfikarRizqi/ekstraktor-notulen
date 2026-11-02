@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { geminiProvider } from "@/lib/llm/gemini";
 import { lmStudioProvider } from "@/lib/llm/openai-compat";
 import { prefilterSentences } from "@/lib/pipeline/prefilter";
 
@@ -63,6 +64,21 @@ describe("prefilterSentences", () => {
       0,
       ...Array.from({ length: 34 }, (_, i) => 26 + i),
     ]);
+  });
+
+  it("Gemini memakai satu panggilan untuk dokumen besar", async () => {
+    const long = Array.from({ length: 60 }, (_, i) => ({
+      index: i,
+      text: "K".repeat(900),
+    }));
+    const spy = vi
+      .spyOn(geminiProvider, "generateStructured")
+      .mockResolvedValue('{"relevant_sentence_ids": [0]}');
+
+    const result = await prefilterSentences(long, "gemini");
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(result).toEqual([0]);
   });
 
   it("fallback per-batch: batch invalid tidak membatalkan batch lain", async () => {

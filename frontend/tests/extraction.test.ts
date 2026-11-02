@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { geminiProvider } from "@/lib/llm/gemini";
 import { lmStudioProvider } from "@/lib/llm/openai-compat";
 import { extractUserStories } from "@/lib/pipeline/extraction";
 
@@ -22,6 +23,18 @@ describe("extractUserStories", () => {
     ]);
     expect(result.stories).toHaveLength(1);
     expect(result.truncated).toBe(false);
+  });
+
+  it("memakai provider Gemini saat mode gemini", async () => {
+    const local = vi.spyOn(lmStudioProvider, "generateStructured");
+    const gemini = vi
+      .spyOn(geminiProvider, "generateStructured")
+      .mockResolvedValue(JSON.stringify(goodStories));
+
+    await extractUserStories([{ index: 0, text: "Admin cetak laporan." }], "gemini");
+
+    expect(gemini).toHaveBeenCalledTimes(1);
+    expect(local).not.toHaveBeenCalled();
   });
 
   it("menolak output >30 story (kontrak maks 30)", async () => {

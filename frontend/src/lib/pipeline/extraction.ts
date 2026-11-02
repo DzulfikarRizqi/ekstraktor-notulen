@@ -16,6 +16,7 @@ import {
 } from "@/lib/llm/prompt";
 import { parseJson } from "@/lib/llm/parse";
 import { withRetry } from "@/lib/retry";
+import type { PipelineProvider } from "@/types";
 
 export interface ExtractionResult {
   stories: UserStoryOutput[];
@@ -50,11 +51,13 @@ const capStories = (stories: UserStoryOutput[]): ExtractionResult => {
   return { stories: truncated ? stories.slice(0, 30) : stories, truncated };
 };
 
-const selectProvider = (): {
+const selectProvider = (
+  mode: PipelineProvider,
+): {
   provider: LlmProvider;
   schema: Record<string, unknown>;
 } => {
-  if (config.EXTRACT_PROVIDER === "lmstudio") {
+  if (mode === "lmstudio") {
     return { provider: lmStudioProvider, schema: userStoriesJsonSchema };
   }
   return { provider: geminiProvider, schema: userStoriesGeminiSchema };
@@ -62,8 +65,9 @@ const selectProvider = (): {
 
 export async function extractUserStories(
   sentences: IndexedSentence[],
+  mode: PipelineProvider = config.EXTRACT_PROVIDER,
 ): Promise<ExtractionResult> {
-  const { provider, schema } = selectProvider();
+  const { provider, schema } = selectProvider(mode);
   const { system, user } = buildExtractionPrompt(sentences);
 
   const attempt = async (userPrompt: string): Promise<UserStoryOutput[]> => {

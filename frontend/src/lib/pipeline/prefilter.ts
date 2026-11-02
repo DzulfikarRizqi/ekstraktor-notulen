@@ -1,9 +1,16 @@
 import { config } from "@/lib/config";
+import { geminiProvider } from "@/lib/llm/gemini";
 import { lmStudioProvider } from "@/lib/llm/openai-compat";
 import { generateStructured } from "@/lib/llm/provider";
-import { prefilterSchema, prefilterJsonSchema } from "@/lib/llm/schema";
+import {
+  prefilterSchema,
+  prefilterJsonSchema,
+  prefilterGeminiSchema,
+} from "@/lib/llm/schema";
 import { buildPrefilterPrompt, type IndexedSentence } from "@/lib/llm/prompt";
 import { parseJson } from "@/lib/llm/parse";
+import { withRetry } from "@/lib/retry";
+import type { PipelineProvider } from "@/types";
 
 // Estimasi kasar: ~4 karakter per token untuk teks rapat campuran ID/EN.
 const CHARS_PER_TOKEN = 4;
@@ -37,27 +44,37 @@ function chunkSentences(
 }
 
 /**
- * Menyaring kalimat relevan via local LLM, dalam batch agar prompt tidak
- * melampaui context window (mis. n_ctx 8192). Perilaku fallback per batch
- * konsisten dengan perilaku lama: output kosong/invalid → semua kalimat
- * batch lolos. Kesalahan layanan (LM Studio tidak aktif) → dilempar ke atas
- * agar pipeline gagal jelas.
+ * Menyaring kalimat relevan via provider pipeline. Mode LM Studio memecah
+ * kalimat menjadi batch agar prompt tidak melampaui context window (mis.
+ * n_ctx 8192); mode Gemini mengirim seluruh dokumen dalam satu panggilan.
+ * Output kosong/invalid per batch → semua kalimat batch lolos. Kesalahan
+ * layanan (provider tidak aktif) → dilempar ke atas agar pipeline gagal jelas.
  */
 export async function prefilterSentences(
   sentences: IndexedSentence[],
+  provider: PipelineProvider = config.EXTRACT_PROVIDER,
 ): Promise<number[]> {
   if (sentences.length === 0) return [];
 
-  const chunks = chunkSentences(sentences, config.PREFILTER_BATCH_TOKENS);
+  const llm = provider === "gemini" ? geminiProvider : lmStudioProvider;
+  const jsonSchema =
+    provider === "gemini" ? prefilterGeminiSchema : prefilterJsonSchema;
+  // Gemini punya context window besar: satu panggilan untuk seluruh dokumen.
+  const chunks =
+    provider === "gemini"
+      ? [sentences]
+      : chunkSentences(sentences, config.PREFILTER_BATCH_TOKENS);
   const kept: number[] = [];
 
   for (const chunk of chunks) {
     const { system, user } = buildPrefilterPrompt(chunk);
     // Error layanan (ECONNREFUSED, 5xx) diteruskan ke atas → status dokumen failed.
-    const raw = await generateStructured(
-      lmStudioProvider,
-      { systemPrompt: system, userPrompt: user, jsonSchema: prefilterJsonSchema },
-      "prefilter local",
+    const raw = await withRetry(() =>
+      generateStructured(
+        llm,
+        { systemPrompt: system, userPrompt: user, jsonSchema },
+        `prefilter ${llm.name}`,
+      ),
     );
 
     let batchKept: number[] | null = null;
